@@ -21,7 +21,30 @@ import app.models  # Load all models
 config = context.config
 
 # Dynamically set sqlalchemy.url from app settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+# config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+
+# Get database URL
+database_url = settings.DATABASE_URL.strip()
+
+# Convert PostgreSQL URL to async SQLAlchemy URL
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace(
+        "postgres://",
+        "postgresql+asyncpg://",
+        1
+    )
+elif database_url.startswith("postgresql://"):
+    database_url = database_url.replace(
+        "postgresql://",
+        "postgresql+asyncpg://",
+        1
+    )
+
+# Set URL for Alembic
+config.set_main_option(
+    "sqlalchemy.url",
+    database_url.replace("%", "%%")
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
