@@ -6,7 +6,11 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import get_current_user, require_candidate, require_recruiter
+from app.core.permissions import (
+    get_current_user,
+    require_approved_recruiter,
+    require_candidate,
+)
 from app.models.user import User, Notification
 from app.models.candidate import CandidateProfile, Resume
 from app.models.company import Company, RecruiterProfile
@@ -223,7 +227,7 @@ async def get_my_applications(
 async def get_recruiter_applications(
     job_id: Optional[int] = Query(None),
     status_filter: Optional[str] = Query(None),
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     conditions = []
@@ -280,7 +284,7 @@ async def get_recruiter_applications(
 async def update_application_status(
     application_id: int,
     payload: ApplicationStatusUpdate,
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     stmt = (
@@ -339,7 +343,7 @@ async def update_application_status(
 @router.post("/interviews", response_model=InterviewResponse, status_code=status.HTTP_201_CREATED)
 async def schedule_interview(
     payload: InterviewCreate,
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     stmt = (

@@ -45,6 +45,8 @@ def create_access_token(
 def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if not isinstance(payload, dict):
+            return None
         return payload
     except JWTError:
         return None

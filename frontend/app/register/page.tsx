@@ -74,7 +74,7 @@ export default function RegisterPage() {
           throw new Error(data.detail || "Candidate registration failed.");
         }
 
-        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=${data.verification_required ? "1" : "0"}`);
+        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=1&email_sent=${data.verification_email_sent ? "1" : "0"}`);
       } else {
         // Recruiter Registration
         const res = await fetch(`${API_BASE_URL}/auth/register/recruiter`, {
@@ -101,7 +101,7 @@ export default function RegisterPage() {
           throw new Error(data.detail || "Recruiter registration failed.");
         }
 
-        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=${data.verification_required ? "1" : "0"}`);
+        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=1&email_sent=${data.verification_email_sent ? "1" : "0"}`);
       }
     } catch (err: any) {
       setError(err.message);

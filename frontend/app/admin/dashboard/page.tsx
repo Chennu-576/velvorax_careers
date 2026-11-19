@@ -27,6 +27,7 @@ export default function AdminDashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
+  const [recruiters, setRecruiters] = useState<any[]>([]);
   const [employerRequests, setEmployerRequests] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -56,10 +57,11 @@ export default function AdminDashboardPage() {
   const loadAdminData = async (token: string) => {
     setLoading(true);
     try {
-      const [sRes, uRes, cRes, rRes, fRes, aRes, jRes] = await Promise.all([
+      const [sRes, uRes, cRes, recruiterRes, rRes, fRes, aRes, jRes] = await Promise.all([
         fetch(`${API_BASE_URL}/admin/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/admin/companies`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/admin/recruiters`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/admin/employer-requests`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/admin/finance/invoices`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/admin/audit-logs`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -69,6 +71,7 @@ export default function AdminDashboardPage() {
       if (sRes.ok) setStats(await sRes.json());
       if (uRes.ok) setUsers(await uRes.json());
       if (cRes.ok) setCompanies(await cRes.json());
+      if (recruiterRes.ok) setRecruiters(await recruiterRes.json());
       if (rRes.ok) setEmployerRequests(await rRes.json());
       if (fRes.ok) setInvoices(await fRes.json());
       if (aRes.ok) setAuditLogs(await aRes.json());
@@ -124,6 +127,37 @@ export default function AdminDashboardPage() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRecruiterApproval = async (
+    recruiterProfileId: number,
+    currentApproved: boolean
+  ) => {
+    const token = getAuthToken();
+    try {
+      const params = new URLSearchParams({
+        is_approved: String(!currentApproved),
+      });
+      const response = await fetch(
+        `${API_BASE_URL}/admin/recruiters/${recruiterProfileId}/approval?${params}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Unable to update recruiter approval.");
+      }
+      setRecruiters((currentRecruiters) => currentRecruiters.map((recruiter) => (
+        recruiter.id === recruiterProfileId
+          ? { ...recruiter, is_approved: !currentApproved }
+          : recruiter
+      )));
+    } catch (error) {
+      console.error("Recruiter approval update failed.", error);
+      window.alert("Unable to update recruiter approval. Check recruiter email and company verification status.");
     }
   };
 
@@ -427,34 +461,64 @@ export default function AdminDashboardPage() {
             {companies.map((c) => (
               <div
                 key={c.id}
-                className="p-4 rounded-2xl border border-brand-border bg-brand-softBg flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="p-4 rounded-2xl border border-brand-border bg-brand-softBg space-y-4"
               >
-                <div>
-                  <h4 className="font-bold text-xs text-brand-deepNavy">{c.name}</h4>
-                  <span className="text-[11px] text-brand-textSecondary">
-                    {c.city || c.country || "Global"} •{" "}
-                    {c.is_verified ? "Verified Partner" : "Unverified"}
-                  </span>
-                  <p className="mt-1 text-[11px] text-brand-textSecondary">
-                    GSTIN: {c.gstin || "Not provided"} • CIN: {c.cin || "Not provided"}
-                  </p>
-                  {c.verification_notes && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-bold text-xs text-brand-deepNavy">{c.name}</h4>
+                    <span className="text-[11px] text-brand-textSecondary">
+                      {c.city || c.country || "Global"} •{" "}
+                      {c.is_verified ? "Verified Partner" : "Unverified"}
+                    </span>
                     <p className="mt-1 text-[11px] text-brand-textSecondary">
-                      Review notes: {c.verification_notes}
+                      GSTIN: {c.gstin || "Not provided"} • CIN: {c.cin || "Not provided"}
                     </p>
-                  )}
+                    {c.verification_notes && (
+                      <p className="mt-1 text-[11px] text-brand-textSecondary">
+                        Review notes: {c.verification_notes}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => handleVerifyCompany(c.id, c.is_verified)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      c.is_verified
+                        ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                        : "bg-brand-yellow text-brand-deepNavy hover:bg-brand-yellowHover"
+                    }`}
+                  >
+                    {c.is_verified ? "Verified ✓" : "Verify Partner"}
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => handleVerifyCompany(c.id, c.is_verified)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    c.is_verified
-                      ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
-                      : "bg-brand-yellow text-brand-deepNavy hover:bg-brand-yellowHover"
-                  }`}
-                >
-                  {c.is_verified ? "Verified ✓" : "Verify Partner"}
-                </button>
+                <div className="border-t border-brand-border pt-3">
+                  <h5 className="text-[11px] font-bold uppercase tracking-wide text-brand-deepNavy">
+                    Recruiter approvals
+                  </h5>
+                  <div className="mt-2 space-y-2">
+                    {recruiters.filter((recruiter) => recruiter.company_id === c.id).map((recruiter) => (
+                      <div key={recruiter.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl bg-white px-3 py-2">
+                        <div>
+                          <p className="text-xs font-semibold text-brand-deepNavy">{recruiter.full_name}</p>
+                          <p className="text-[11px] text-brand-textSecondary">
+                            {recruiter.email} · {recruiter.is_verified ? "Email verified" : "Email pending"}
+                          </p>
+                        </div>
+                        <button
+                          disabled={!recruiter.is_approved && (!c.is_verified || !recruiter.is_verified || !recruiter.is_active)}
+                          onClick={() => handleRecruiterApproval(recruiter.id, recruiter.is_approved)}
+                          className="rounded-lg border border-brand-border px-3 py-1.5 text-[11px] font-bold text-brand-deepNavy disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {recruiter.is_approved ? "Revoke approval" : "Approve recruiter"}
+                        </button>
+                      </div>
+                    ))}
+                    {!recruiters.some((recruiter) => recruiter.company_id === c.id) && (
+                      <p className="text-[11px] text-brand-textSecondary">No recruiter accounts for this company.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

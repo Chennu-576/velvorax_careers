@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
@@ -10,7 +10,9 @@ def validate_bcrypt_password_length(password: str) -> str:
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    role: str = Field(..., description="Role selected on frontend: Admin, Recruiter/HR, or Candidate")
+    role: Literal["Admin", "Recruiter/HR", "Candidate"] = Field(
+        ..., description="Role selected on frontend"
+    )
 
 class CandidateRegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)

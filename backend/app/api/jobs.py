@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import get_current_user, require_recruiter
+from app.core.permissions import get_current_user, require_approved_recruiter
 from app.models.user import User
 from app.models.company import Company, RecruiterProfile
 from app.models.taxonomy import JobCategory, JobSubcategory
@@ -180,7 +180,7 @@ async def get_job_by_slug_or_id(
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     payload: JobCreate,
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     company_id = payload.company_id
@@ -273,7 +273,7 @@ async def create_job(
 async def update_job(
     job_id: int,
     payload: JobUpdate,
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     stmt = (
@@ -329,7 +329,7 @@ async def update_job(
 async def update_job_status(
     job_id: int,
     status_val: str = Query(..., description="DRAFT, PENDING_APPROVAL, PUBLISHED, REJECTED, PAUSED, CLOSED, ARCHIVED"),
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_approved_recruiter),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     stmt = select(Job).where(Job.id == job_id)

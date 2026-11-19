@@ -1,76 +1,72 @@
-# VELVORAX Careers Audit Report
+# VELVORAX Careers Authentication Audit
 
 Audit date: 2026-11-19
 
-## Implementation Status
+## Findings and changes
 
-- Candidate and recruiter registration no longer issue or store access tokens before verification.
-- Candidate and recruiter registration now redirect to login with a verification-required notice.
-- A real verification page and password-reset page were added.
-- SMTP delivery was implemented with environment-configured host, port, TLS/SSL, credentials,
-  sender, and frontend verification/reset links.
-- Production cookies support Secure/SameSite configuration; logout also clears configured cookie attributes.
-- Public job detail lookup is restricted to `PUBLISHED` jobs.
-- Recruiter application status updates and interview scheduling now verify company ownership.
-- Recruiter resume access is restricted to candidates who applied to jobs in the recruiter company.
-- Recruiter job updates now synchronize submitted job skills.
-- New application notifications are created for both candidates and recruiters.
-- Notification list/read endpoints were added.
-- Candidate profile updates support full name and phone as well as profile fields.
-- Candidate education, experience, and skill creation endpoints were added.
-- Frontend production build passes.
+- Candidate and recruiter registration now always create unverified accounts, persist
+  their profiles and SHA-256 verification-token hashes, and commit before attempting
+  email delivery. A failed delivery is returned accurately; neither account is
+  automatically verified.
+- Verification tokens are one-time and time-limited. Resending invalidates earlier
+  unused tokens, persists the replacement before delivery, and is rate-limited by
+  source IP and account. Verification and password-reset token consumption is committed
+  with the corresponding account update.
+- Password reset uses the same persisted, hashed, expiring-token flow. Unknown
+  accounts receive a non-enumerating response that does not claim delivery.
+- Admin provisioning remains a trusted CLI-only flow. Bootstrap now validates the
+  email and administrator name; login and API access require active, verified users.
+- Company verification no longer changes recruiter approval. An explicit admin
+  recruiter-approval endpoint and dashboard controls require the recruiter to be
+  active and email-verified and the company to be verified. General admin user-status
+  updates cannot bypass email verification.
+- JWT authorization checks the current database user, token subject and role, active
+  status, and verification state. Recruiter job and applicant-management operations
+  require both recruiter approval and company verification.
+- Email delivery supports Resend over HTTPS and explicit SMTP compatibility. Delivery
+  results are logged without recipient addresses, credentials, or raw tokens; provider
+  response details are not returned to users. Job approval/rejection notifications
+  are dispatched after the status transaction commits.
+- The unified login keeps the three role choices, validates role-specific redirects,
+  and sends credentials with the cross-origin session cookie. Registration reports
+  delivery failure, a dedicated forgot-password page is available, and logout clears
+  both the browser state and API cookie.
 
-## Executive Summary
+## Email connectivity
 
-The project has a substantial Next.js/FastAPI/PostgreSQL implementation. Public job discovery,
-candidate/recruiter/admin dashboards, moderation, applications, resumes, interviews, and
-database models exist. The main remaining risks are authentication session issuance during
-unverified registration, mock email dispatch, cross-company recruiter authorization gaps,
-unpublished-job visibility, and missing frontend verification handling.
+The reported `OSError: [Errno 101] Network is unreachable` occurs at network
+connectivity, before SMTP TLS negotiation. Changing SMTP TLS/SSL flags cannot fix an
+unreachable outbound SMTP route. The configured Resend HTTPS API avoids SMTP egress
+requirements, but it still requires a valid Render API key and a verified sender
+domain. No real inbox delivery or production verification was performed in this
+workspace.
 
-## Frontend
+## Database and migrations
 
-- Pages inspected: public jobs, categories, IT/non-IT/global jobs, job details, login,
-  registration, candidate dashboard, recruiter dashboard, admin dashboard, and CMS-backed about page.
-- API integration: most dashboard and public listing calls match existing FastAPI routes.
-- Findings:
-  - Registration immediately stores a token and redirects to a dashboard, even when email
-    verification is required.
-  - No frontend verification page exists.
-  - The login and role-selector contracts match the backend role enforcement.
-  - Candidate and recruiter dashboards consume real API data for core metrics and records.
-  - Several expanded profile and notification features are not represented in complete UI flows.
-  - Frontend build is currently successful.
+- Existing SQLAlchemy user, profile, verification-token, and reset-token tables
+  already support the audited flows; no schema change was needed.
+- The local PostgreSQL database reports Alembic revision `a6fb1d9e3c42` as current
+  head. No production migration was run.
+- Application startup remains migration-oriented; it does not call
+  `Base.metadata.create_all()`.
 
-## Backend
+## Validation
 
-- Routers inspected: auth, jobs, categories, locations, applications, candidates,
-  recruiters, employer requests, training, finance, admin, and CMS.
-- Working areas: JWT login, role mismatch rejection, candidate/recruiter profile creation,
-  PostgreSQL-backed listings, duplicate application prevention, job moderation, status history,
-  and real resume file validation/storage.
-- Findings:
-  - Registration returns access tokens for unverified users and sets authentication cookies.
-  - Verification and password-reset emails are currently print-only mock implementations.
-  - Recruiter application status and interview endpoints need stronger company ownership checks.
-  - Resume download authorization allows all recruiters instead of recruiters with a legitimate
-    application for the candidate.
-  - Public job lookup may expose unpublished jobs.
-  - The test suite requires the local PostgreSQL test configuration or an equivalent async
-    database environment.
+- Focused PostgreSQL authentication/approval tests: 15 passed. Covered candidate and
+  recruiter registration/verification/login, admin bootstrap/login/access, approval
+  separation, token reuse/expiry, inactive and unverified login, role mismatch,
+  password reset, logout, and simulated email success/failure.
+- Full backend suite: 22 passed, 3 failed due missing local taxonomy/geography seed
+  records and a resume-storage `502`; those failures are outside authentication.
+- Frontend production build and backend Python compilation passed.
+- Alembic reports `a6fb1d9e3c42` as current head. Render `/health` and the Vercel site
+  returned HTTP 200.
 
-## Database
+## Deployment status
 
-- SQLAlchemy 2.x models cover users, profiles, companies, jobs, categories, applications,
-  resumes, interviews, verification/reset tokens, notifications, audit logs, and finance.
-- Core foreign keys, unique constraints, cascades, and indexes are present.
-- Alembic migration exists for the baseline schema.
-- No destructive migration or production database operation is included in this audit.
-
-## Deployment and Environment
-
-- Frontend API configuration is environment-driven in `frontend/lib/api.ts`.
-- CORS is currently explicit for localhost and Vercel.
-- Backend database initialization is migration-oriented and does not call `create_all()` at startup.
-- SMTP credentials and delivery behavior need an explicit backend configuration.
-- Existing `.env` files are not committed as implementation changes.
+The public Render health endpoint and Vercel site responded successfully during this
+audit. Render/Vercel environment settings were not inspectable or changed from this
+workspace. Production delivery remains dependent on configuring `EMAIL_PROVIDER`,
+`RESEND_API_KEY`, `EMAIL_FROM`, `FRONTEND_URL`, and `CORS_ORIGINS` in Render and
+`NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` in Vercel. No commit, push, or deployment
+was performed.

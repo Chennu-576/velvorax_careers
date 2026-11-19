@@ -18,6 +18,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -26,29 +27,12 @@ function LoginForm() {
     if (registeredEmail) setEmail(registeredEmail);
     if (searchParams.get("registered") === "1") {
       setNotice(searchParams.get("verify") === "1"
-        ? "Registration successful. Check your email and verify your account before logging in."
+        ? searchParams.get("email_sent") === "1"
+          ? "Registration successful. Check your email and verify your account before logging in."
+          : "Registration successful, but we could not deliver the verification email. Use Resend verification below."
         : "Registration successful. You can log in now.");
     }
   }, [searchParams]);
-
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setError("Enter your email address before requesting a password reset.");
-      return;
-    }
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      setNotice(res.ok ? data.message : "Unable to request a password reset.");
-    } catch {
-      setNotice("Unable to request a password reset.");
-    }
-  };
 
   const handleResendVerification = async () => {
     if (!email) {
@@ -56,6 +40,8 @@ function LoginForm() {
       return;
     }
     setError(null);
+    setNotice(null);
+    setResending(true);
     try {
       const res = await fetch(`${API_BASE_URL}/auth/resend-verification`, {
         method: "POST",
@@ -63,9 +49,16 @@ function LoginForm() {
         body: JSON.stringify({ email: email.trim() }),
       });
       const data = await res.json();
-      setNotice(res.ok ? data.message : "Unable to resend the verification link.");
+      if (!res.ok) {
+        throw new Error(data.detail || "Unable to resend the verification link.");
+      }
+      setNotice(data.verification_email_sent
+        ? "A verification email was sent. Check your inbox and spam folder."
+        : "We could not confirm delivery. If your account is unverified, try again later or check the email address.");
     } catch {
-      setNotice("Unable to resend the verification link.");
+      setError("Unable to resend the verification link. Please try again later.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -77,6 +70,7 @@ function LoginForm() {
     try {
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
@@ -94,18 +88,16 @@ function LoginForm() {
       // Save token & user profile
       saveAuth(data.access_token, data.user);
 
-      // Role-based redirects per Section 6.1
-      if (returnUrl && returnUrl.startsWith("/")) {
-        router.push(returnUrl);
-      } else {
-        if (data.role === "ADMIN" || data.role === "SUPER_ADMIN") {
-          router.push("/admin/dashboard");
-        } else if (data.role === "RECRUITER") {
-          router.push("/recruiter/dashboard");
-        } else {
-          router.push("/candidate/dashboard");
-        }
-      }
+      const dashboard = data.role === "ADMIN" || data.role === "SUPER_ADMIN"
+        ? "/admin/dashboard"
+        : data.role === "RECRUITER"
+          ? "/recruiter/dashboard"
+          : "/candidate/dashboard";
+      const safeReturnUrl = returnUrl &&
+        (returnUrl === dashboard || returnUrl.startsWith(`${dashboard}/`))
+        ? returnUrl
+        : dashboard;
+      router.push(safeReturnUrl);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -218,12 +210,12 @@ function LoginForm() {
               <span>Remember me</span>
             </label>
             <div className="flex items-center gap-3">
-              <button type="button" onClick={handleResendVerification} className="text-brand-corpBlue font-semibold hover:underline">
-                Resend verification
+              <button type="button" disabled={resending} onClick={handleResendVerification} className="text-brand-corpBlue font-semibold hover:underline disabled:opacity-50">
+                {resending ? "Sending..." : "Resend verification"}
               </button>
-              <button type="button" onClick={handleForgotPassword} className="text-brand-corpBlue font-semibold hover:underline">
+              <Link href="/forgot-password" className="text-brand-corpBlue font-semibold hover:underline">
                 Forgot password?
-              </button>
+              </Link>
             </div>
           </div>
 

@@ -2,11 +2,13 @@ from typing import List, Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.models.user import User
+from app.models.company import RecruiterProfile
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
@@ -36,18 +38,28 @@ async def get_current_user(
         raise credentials_exception
 
     user_id: Optional[int] = payload.get("user_id")
-    if user_id is None:
+    if not isinstance(user_id, int):
         raise credentials_exception
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    if user is None:
+    if (
+        user is None
+        or payload.get("sub") != user.email
+        or payload.get("role") != user.role
+    ):
         raise credentials_exception
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated. Please contact support."
+        )
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address has not been verified.",
         )
 
     return user
@@ -68,3 +80,30 @@ def require_roles(allowed_roles: List[str]):
 require_admin = require_roles(["ADMIN", "SUPER_ADMIN"])
 require_recruiter = require_roles(["RECRUITER", "ADMIN", "SUPER_ADMIN"])
 require_candidate = require_roles(["CANDIDATE"])
+
+
+async def require_approved_recruiter(
+    current_user: User = Depends(require_recruiter),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.role in {"ADMIN", "SUPER_ADMIN"}:
+        return current_user
+
+    profile = (
+        await db.execute(
+            select(RecruiterProfile)
+            .where(RecruiterProfile.user_id == current_user.id)
+            .options(selectinload(RecruiterProfile.company))
+        )
+    ).scalar_one_or_none()
+    if (
+        not profile
+        or not profile.is_approved
+        or not profile.company
+        or not profile.company.is_verified
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your recruiter and company profiles must be approved for this operation.",
+        )
+    return current_user

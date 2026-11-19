@@ -1,17 +1,22 @@
 import io
+import hashlib
 import uuid
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import DateTime
 
 from app.main import app
 from app.core.config import settings
 from app.core.database import async_session_maker, Base
-from app.models.user import User
+from app.models.user import User, EmailVerificationToken, PasswordResetToken
 from app.models.company import Company, RecruiterProfile
 from app.models.candidate import CandidateProfile, Resume
+from app.models.taxonomy import JobCategory
 from app.services.email_service import EmailService
+from app.cli.bootstrap_admin import bootstrap_superadmin
+from app.core.security import verify_password
 
 @pytest.mark.asyncio
 async def test_health_check(async_client: AsyncClient):
@@ -63,6 +68,19 @@ async def test_recruiter_must_have_verified_company_before_posting(
     async_client: AsyncClient, test_recruiter, test_admin
 ):
     async with async_session_maker() as db:
+        category = (
+            await db.execute(select(JobCategory).order_by(JobCategory.id).limit(1))
+        ).scalar_one_or_none()
+        if not category:
+            category = JobCategory(
+                name=f"Approval Test Category {uuid.uuid4().hex[:8]}",
+                slug=f"approval-test-{uuid.uuid4().hex[:8]}",
+                category_type="IT",
+            )
+            db.add(category)
+            await db.flush()
+        category_id = category.id
+
         company = await db.get(Company, test_recruiter["company_id"])
         profile = (
             await db.execute(
@@ -73,11 +91,12 @@ async def test_recruiter_must_have_verified_company_before_posting(
         ).scalar_one()
         company.is_verified = False
         profile.is_approved = False
+        profile_id = profile.id
         await db.commit()
 
     job_payload = {
         "title": f"Verified Employer Role {uuid.uuid4().hex[:6]}",
-        "category_id": 1,
+        "category_id": category_id,
         "description": "A test role requiring manual employer verification.",
         "skills": ["Python"],
     }
@@ -96,6 +115,18 @@ async def test_recruiter_must_have_verified_company_before_posting(
         headers=test_admin["headers"],
     )
     assert verification.status_code == 200
+
+    still_blocked = await async_client.post(
+        "/api/v1/jobs", headers=test_recruiter["headers"], json=job_payload
+    )
+    assert still_blocked.status_code == 403
+
+    approval = await async_client.patch(
+        f"/api/v1/admin/recruiters/{profile_id}/approval",
+        params={"is_approved": "true"},
+        headers=test_admin["headers"],
+    )
+    assert approval.status_code == 200
 
     allowed = await async_client.post(
         "/api/v1/jobs", headers=test_recruiter["headers"], json=job_payload
@@ -241,6 +272,375 @@ async def test_email_verification_flow(async_client: AsyncClient):
     assert "access_token" in success_login.json()
 
 @pytest.mark.asyncio
+async def test_candidate_registration_reports_failed_delivery_and_persists_hash(
+    async_client: AsyncClient, monkeypatch
+):
+    async def fail_delivery(email: str, token: str, full_name: str) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        EmailService, "send_verification_email", staticmethod(fail_delivery)
+    )
+    email = f"delivery.failure.{uuid.uuid4().hex}@velvorax.tech"
+    response = await async_client.post(
+        "/api/v1/auth/register/candidate",
+        json={
+            "full_name": "Delivery Failure Candidate",
+            "email": email,
+            "password": "SecurePassword123!",
+            "confirm_password": "SecurePassword123!",
+        },
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["is_verified"] is False
+    assert result["verification_required"] is True
+    assert result["verification_email_sent"] is False
+    assert "could not be sent" in result["message"]
+
+    async with async_session_maker() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        token = (
+            await db.execute(
+                select(EmailVerificationToken).where(
+                    EmailVerificationToken.user_id == user.id
+                )
+            )
+        ).scalar_one()
+        profile = (
+            await db.execute(
+                select(CandidateProfile).where(
+                    CandidateProfile.user_id == user.id
+                )
+            )
+        ).scalar_one()
+        assert profile is not None
+        assert token.token_hash != ""
+        assert len(token.token_hash) == 64
+
+@pytest.mark.asyncio
+async def test_resend_invalidates_previous_token_and_reports_delivery_failure(
+    async_client: AsyncClient, monkeypatch
+):
+    async def successful_delivery(email: str, token: str, full_name: str) -> bool:
+        return True
+
+    async def failed_delivery(email: str, token: str, full_name: str) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        EmailService, "send_verification_email", staticmethod(successful_delivery)
+    )
+    email = f"resend.{uuid.uuid4().hex}@velvorax.tech"
+    registration = await async_client.post(
+        "/api/v1/auth/register/candidate",
+        json={
+            "full_name": "Resend Candidate",
+            "email": email,
+            "password": "SecurePassword123!",
+            "confirm_password": "SecurePassword123!",
+        },
+    )
+    assert registration.status_code == 201
+
+    async with async_session_maker() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        previous = (
+            await db.execute(
+                select(EmailVerificationToken).where(
+                    EmailVerificationToken.user_id == user.id
+                )
+            )
+        ).scalar_one()
+        previous_hash = previous.token_hash
+
+    monkeypatch.setattr(
+        EmailService, "send_verification_email", staticmethod(failed_delivery)
+    )
+    response = await async_client.post(
+        "/api/v1/auth/resend-verification", json={"email": email}
+    )
+    assert response.status_code == 200
+    assert response.json()["verification_email_sent"] is False
+
+    async with async_session_maker() as db:
+        tokens = (
+            await db.execute(
+                select(EmailVerificationToken)
+                .where(EmailVerificationToken.user_id == user.id)
+                .order_by(EmailVerificationToken.id)
+            )
+        ).scalars().all()
+        assert len(tokens) == 2
+        assert tokens[0].token_hash == previous_hash
+        assert tokens[0].is_used is True
+        assert tokens[1].is_used is False
+
+@pytest.mark.asyncio
+async def test_resend_provider_reports_acceptance_without_logging_credentials(
+    monkeypatch, caplog
+):
+    captured_request = {}
+    response_status = 202
+
+    class FakeResponse:
+        def __init__(self, status_code: int):
+            self.status_code = status_code
+            self.is_success = 200 <= status_code < 300
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: int):
+            assert timeout == 15
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            captured_request.update(url=url, headers=headers, json=json)
+            return FakeResponse(response_status)
+
+    provider_key = "test-provider-key"
+    raw_token = "test-raw-verification-token"
+    monkeypatch.setattr(settings, "EMAIL_PROVIDER", "resend")
+    monkeypatch.setattr(settings, "RESEND_API_KEY", provider_key)
+    monkeypatch.setattr(settings, "EMAIL_FROM", "VELVORAX Careers <no-reply@example.com>")
+    monkeypatch.setattr("app.services.email_service.httpx.AsyncClient", FakeAsyncClient)
+
+    sent = await EmailService.send_verification_email(
+        "candidate@example.com", raw_token, "Test Candidate"
+    )
+    assert sent is True
+    assert captured_request["url"] == "https://api.resend.com/emails"
+    assert captured_request["headers"]["Authorization"] == f"Bearer {provider_key}"
+    assert captured_request["json"]["from"] == "VELVORAX Careers <no-reply@example.com>"
+    assert raw_token in captured_request["json"]["text"]
+
+    response_status = 503
+    failed = await EmailService.send_verification_email(
+        "candidate@example.com", raw_token, "Test Candidate"
+    )
+    assert failed is False
+    assert provider_key not in caplog.text
+    assert raw_token not in caplog.text
+
+@pytest.mark.asyncio
+async def test_expired_verification_token_is_rejected(async_client: AsyncClient, test_candidate):
+    raw_token = uuid.uuid4().hex
+    async with async_session_maker() as db:
+        token = EmailVerificationToken(
+            user_id=test_candidate["user"].id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            is_used=False,
+        )
+        db.add(token)
+        await db.commit()
+        token_id = token.id
+
+    response = await async_client.post(
+        "/api/v1/auth/verify-email", json={"token": raw_token}
+    )
+    assert response.status_code == 400
+
+    async with async_session_maker() as db:
+        persisted = await db.get(EmailVerificationToken, token_id)
+        assert persisted is not None
+        assert persisted.is_used is False
+
+@pytest.mark.asyncio
+async def test_inactive_account_cannot_log_in_or_use_existing_token(
+    async_client: AsyncClient, test_candidate
+):
+    async with async_session_maker() as db:
+        user = await db.get(User, test_candidate["user"].id)
+        user.is_active = False
+        await db.commit()
+
+    login = await async_client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": test_candidate["email"],
+            "password": test_candidate["password"],
+            "role": "Candidate",
+        },
+    )
+    assert login.status_code == 403
+    me = await async_client.get(
+        "/api/v1/auth/me", headers=test_candidate["headers"]
+    )
+    assert me.status_code == 403
+
+@pytest.mark.asyncio
+async def test_logout_clears_session_cookie(async_client: AsyncClient, test_candidate):
+    response = await async_client.post(
+        "/api/v1/auth/logout", headers=test_candidate["headers"]
+    )
+    assert response.status_code == 200
+    assert "access_token" in response.headers.get("set-cookie", "")
+
+@pytest.mark.asyncio
+async def test_superadmin_bootstrap_creates_verified_admin_and_admin_api_access(
+    async_client: AsyncClient,
+):
+    email = f"bootstrap.{uuid.uuid4().hex}@example.com"
+    password = "BootstrapAdmin123!"
+    await bootstrap_superadmin(email, password, "Bootstrap Test Admin")
+
+    async with async_session_maker() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        assert user.role == "SUPER_ADMIN"
+        assert user.is_active is True
+        assert user.is_verified is True
+        assert verify_password(password, user.hashed_password)
+
+    login = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password, "role": "Admin"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    admin_api = await async_client.get(
+        "/api/v1/admin/dashboard/stats", headers=headers
+    )
+    assert admin_api.status_code == 200
+
+@pytest.mark.asyncio
+async def test_candidate_token_cannot_access_admin_api(
+    async_client: AsyncClient, test_candidate
+):
+    response = await async_client.get(
+        "/api/v1/admin/dashboard/stats", headers=test_candidate["headers"]
+    )
+    assert response.status_code == 403
+
+@pytest.mark.asyncio
+async def test_expired_password_reset_token_is_rejected(
+    async_client: AsyncClient, test_candidate
+):
+    raw_token = uuid.uuid4().hex
+    async with async_session_maker() as db:
+        token = PasswordResetToken(
+            user_id=test_candidate["user"].id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            is_used=False,
+        )
+        db.add(token)
+        await db.commit()
+
+    response = await async_client.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "token": raw_token,
+            "new_password": "NewSecurePassword123!",
+            "confirm_password": "NewSecurePassword123!",
+        },
+    )
+    assert response.status_code == 400
+
+@pytest.mark.asyncio
+async def test_recruiter_registration_verification_and_approval_are_separate(
+    async_client: AsyncClient, monkeypatch, test_admin
+):
+    sent_tokens = []
+
+    async def capture_delivery(email: str, token: str, full_name: str) -> bool:
+        sent_tokens.append(token)
+        return True
+
+    monkeypatch.setattr(
+        EmailService, "send_verification_email", staticmethod(capture_delivery)
+    )
+    email = f"verified.recruiter.{uuid.uuid4().hex}@velvorax.tech"
+    registration = await async_client.post(
+        "/api/v1/auth/register/recruiter",
+        json={
+            "full_name": "Verified Recruiter",
+            "work_email": email,
+            "company_name": f"Recruiter Company {uuid.uuid4().hex[:8]}",
+            "password": "SecurePassword123!",
+            "confirm_password": "SecurePassword123!",
+        },
+    )
+
+    assert registration.status_code == 201
+    assert registration.json()["verification_email_sent"] is True
+    assert registration.json()["is_verified"] is False
+    assert len(sent_tokens) == 1
+
+    async with async_session_maker() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        profile = (
+            await db.execute(
+                select(RecruiterProfile).where(RecruiterProfile.user_id == user.id)
+            )
+        ).scalar_one()
+        company_id = profile.company_id
+        profile_id = profile.id
+    admin_headers = test_admin["headers"]
+
+    premature_approval = await async_client.patch(
+        f"/api/v1/admin/recruiters/{profile_id}/approval",
+        params={"is_approved": "true"},
+        headers=admin_headers,
+    )
+    assert premature_approval.status_code == 409
+
+    with_token = await async_client.post(
+        "/api/v1/auth/verify-email", json={"token": sent_tokens[0]}
+    )
+    assert with_token.status_code == 200
+
+    login = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "SecurePassword123!", "role": "Recruiter/HR"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    dashboard = await async_client.get("/api/v1/recruiters/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+    restricted = await async_client.get("/api/v1/recruiter/applications", headers=headers)
+    assert restricted.status_code == 403
+
+    company_verification = await async_client.patch(
+        f"/api/v1/admin/companies/{company_id}/verify",
+        params={"is_verified": "true"},
+        headers=admin_headers,
+    )
+    assert company_verification.status_code == 200
+
+    still_unapproved = await async_client.get(
+        "/api/v1/recruiter/applications", headers=headers
+    )
+    assert still_unapproved.status_code == 403
+
+    approval = await async_client.patch(
+        f"/api/v1/admin/recruiters/{profile_id}/approval",
+        params={"is_approved": "true"},
+        headers=admin_headers,
+    )
+    assert approval.status_code == 200
+    approved_access = await async_client.get(
+        "/api/v1/recruiter/applications", headers=headers
+    )
+    assert approved_access.status_code == 200
+
+    async with async_session_maker() as db:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+        profile = (await db.execute(
+            select(RecruiterProfile).where(RecruiterProfile.user_id == user.id)
+        )).scalar_one()
+        company = await db.get(Company, profile.company_id)
+        assert user.is_verified is True
+        assert profile.is_approved is True
+        assert company is not None
+        assert company.is_verified is True
+
+@pytest.mark.asyncio
 async def test_password_reset_flow(async_client: AsyncClient, test_candidate):
     """Test requesting password reset and resetting password via one-time token."""
     # 1. Request password reset
@@ -261,6 +661,12 @@ async def test_password_reset_flow(async_client: AsyncClient, test_candidate):
         "confirm_password": new_pwd
     })
     assert reset_res.status_code == 200
+    reused_token = await async_client.post("/api/v1/auth/reset-password", json={
+        "token": raw_token,
+        "new_password": new_pwd,
+        "confirm_password": new_pwd
+    })
+    assert reused_token.status_code == 400
 
     # 4. Login with old password fails
     old_login = await async_client.post("/api/v1/auth/login", json={

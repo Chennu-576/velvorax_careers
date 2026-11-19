@@ -17,11 +17,31 @@ from app.models.employer_request import EmployerHiringRequest
 from app.models.training import TrainingEnrollment
 from app.models.finance import Invoice
 from app.models.cms import CMSContent, PlatformSetting
+from app.services.email_service import EmailService
 from app.schemas.auth import UserResponse
 from app.schemas.job import JobResponse
 from app.schemas.cms import CMSContentResponse, CMSContentUpdate
 
 router = APIRouter(prefix="/admin", tags=["Admin Portal"])
+
+
+async def _notify_job_creator(
+    job: Job,
+    reason: Optional[str],
+    db: AsyncSession,
+) -> None:
+    if not job.created_by_recruiter_id:
+        return
+    recruiter_email = await db.scalar(
+        select(User.email)
+        .join(RecruiterProfile, RecruiterProfile.user_id == User.id)
+        .where(RecruiterProfile.id == job.created_by_recruiter_id)
+    )
+    if recruiter_email:
+        await EmailService.send_job_status_notification(
+            recruiter_email, job.title, job.status, reason
+        )
+
 
 class AdminDashboardStats(BaseModel):
     total_users: int
@@ -66,6 +86,21 @@ class CompanyAdminView(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecruiterAdminView(BaseModel):
+    id: int
+    user_id: int
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
+    company_is_verified: bool
+    full_name: str
+    email: str
+    is_active: bool
+    is_verified: bool
+    is_approved: bool
+    created_at: datetime
+
 
 @router.get("/dashboard/stats", response_model=AdminDashboardStats)
 async def get_admin_dashboard_stats(
@@ -119,7 +154,6 @@ async def list_users(
 async def toggle_user_status(
     user_id: int,
     is_active: Optional[bool] = None,
-    is_verified: Optional[bool] = None,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
@@ -129,14 +163,12 @@ async def toggle_user_status(
 
     if is_active is not None:
         user.is_active = is_active
-    if is_verified is not None:
-        user.is_verified = is_verified
 
     audit = AuditLog(
         user_id=current_user.id,
         action="UPDATE_USER_STATUS",
         resource="USERS",
-        details=f"Admin updated User ID {user_id}: active={user.is_active}, verified={user.is_verified}"
+        details=f"Admin updated User ID {user_id}: active={user.is_active}"
     )
     db.add(audit)
     await db.commit()
@@ -151,6 +183,88 @@ async def list_companies(
     stmt = select(Company).order_by(desc(Company.created_at))
     comps = (await db.execute(stmt)).scalars().all()
     return [CompanyAdminView.model_validate(c) for c in comps]
+
+
+@router.get("/recruiters", response_model=List[RecruiterAdminView])
+async def list_recruiters(
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    profiles = (
+        await db.execute(
+            select(RecruiterProfile)
+            .options(
+                selectinload(RecruiterProfile.user),
+                selectinload(RecruiterProfile.company),
+            )
+            .order_by(desc(RecruiterProfile.created_at))
+        )
+    ).scalars().all()
+    return [
+        RecruiterAdminView(
+            id=profile.id,
+            user_id=profile.user_id,
+            company_id=profile.company_id,
+            company_name=profile.company.name if profile.company else None,
+            company_is_verified=bool(profile.company and profile.company.is_verified),
+            full_name=profile.user.full_name,
+            email=profile.user.email,
+            is_active=profile.user.is_active,
+            is_verified=profile.user.is_verified,
+            is_approved=profile.is_approved,
+            created_at=profile.created_at,
+        )
+        for profile in profiles
+    ]
+
+
+@router.patch("/recruiters/{recruiter_profile_id}/approval")
+async def set_recruiter_approval(
+    recruiter_profile_id: int,
+    is_approved: bool = Query(...),
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    profile = (
+        await db.execute(
+            select(RecruiterProfile)
+            .where(RecruiterProfile.id == recruiter_profile_id)
+            .options(
+                selectinload(RecruiterProfile.user),
+                selectinload(RecruiterProfile.company),
+            )
+        )
+    ).scalar_one_or_none()
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recruiter profile not found.",
+        )
+    if is_approved and (
+        not profile.user.is_active
+        or not profile.user.is_verified
+        or not profile.company
+        or not profile.company.is_verified
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Verify and activate the recruiter and company before approving this profile.",
+        )
+
+    profile.is_approved = is_approved
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action="SET_RECRUITER_APPROVAL",
+            resource="RECRUITERS",
+            details=(
+                f"Admin set recruiter profile {profile.id} approval to {is_approved}."
+            ),
+        )
+    )
+    await db.commit()
+    return {"message": "Recruiter approval status updated.", "is_approved": is_approved}
+
 
 @router.patch("/companies/{company_id}/verify")
 async def verify_company(
@@ -171,14 +285,6 @@ async def verify_company(
     comp.verified_by_user_id = current_user.id if is_verified else None
     if is_hiring_partner is not None:
         comp.is_hiring_partner = is_hiring_partner
-    recruiter_profiles = (
-        await db.execute(
-            select(RecruiterProfile).where(RecruiterProfile.company_id == company_id)
-        )
-    ).scalars()
-    for profile in recruiter_profiles:
-        profile.is_approved = is_verified
-
     audit = AuditLog(
         user_id=current_user.id,
         action="VERIFY_COMPANY",
@@ -251,6 +357,7 @@ async def approve_job(
     )
     db.add(audit)
     await db.commit()
+    await _notify_job_creator(job, None, db)
     await db.refresh(job)
     return {"message": f"Job '{job.title}' has been successfully approved and published.", "status": "PUBLISHED"}
 
@@ -293,6 +400,7 @@ async def reject_job(
     )
     db.add(audit)
     await db.commit()
+    await _notify_job_creator(job, job.rejection_reason, db)
     await db.refresh(job)
     return {"message": f"Job '{job.title}' was rejected.", "status": "REJECTED", "rejection_reason": job.rejection_reason}
 
@@ -332,6 +440,11 @@ async def moderate_job(
     )
     db.add(audit)
     await db.commit()
+    await _notify_job_creator(
+        job,
+        job.rejection_reason if job.status == "REJECTED" else None,
+        db,
+    )
     return {"message": f"Job moderation updated to {job.status}."}
 
 # Audit Logs

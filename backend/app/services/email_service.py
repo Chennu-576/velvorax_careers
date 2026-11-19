@@ -1,4 +1,3 @@
-import os
 import secrets
 import hashlib
 import smtplib
@@ -7,17 +6,21 @@ import asyncio
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
-from sqlalchemy import select
+import httpx
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, EmailVerificationToken, PasswordResetToken
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
+
 class EmailService:
     @staticmethod
     def generate_token() -> Tuple[str, str]:
         """
-        Generates a secure 32-byte hex token and returns (raw_token, sha256_hash).
+        Generates a secure random token and returns (raw_token, sha256_hash).
         The raw_token is sent to the user; the sha256_hash is stored in the database.
         """
         raw_token = secrets.token_urlsafe(32)
@@ -25,10 +28,24 @@ class EmailService:
         return raw_token, token_hash
 
     @staticmethod
-    async def create_verification_token(user_id: int, db: AsyncSession, hours_valid: int = 24) -> str:
+    async def create_verification_token(
+        user_id: int,
+        db: AsyncSession,
+        hours_valid: int = 24,
+        commit: bool = True,
+    ) -> str:
         raw_token, token_hash = EmailService.generate_token()
         expires_at = datetime.now(timezone.utc) + timedelta(hours=hours_valid)
 
+        await db.execute(select(User.id).where(User.id == user_id).with_for_update())
+        await db.execute(
+            update(EmailVerificationToken)
+            .where(
+                EmailVerificationToken.user_id == user_id,
+                EmailVerificationToken.is_used.is_(False),
+            )
+            .values(is_used=True)
+        )
         token_record = EmailVerificationToken(
             user_id=user_id,
             token_hash=token_hash,
@@ -36,7 +53,9 @@ class EmailService:
             is_used=False
         )
         db.add(token_record)
-        await db.commit()
+        await db.flush()
+        if commit:
+            await db.commit()
         return raw_token
 
     @staticmethod
@@ -46,8 +65,9 @@ class EmailService:
             select(EmailVerificationToken)
             .where(
                 EmailVerificationToken.token_hash == token_hash,
-                EmailVerificationToken.is_used == False
+                EmailVerificationToken.is_used.is_(False),
             )
+            .with_for_update()
         )
         result = await db.execute(stmt)
         token_record = result.scalar_one_or_none()
@@ -61,27 +81,49 @@ class EmailService:
         if token_expiry.tzinfo is None:
             token_expiry = token_expiry.replace(tzinfo=timezone.utc)
 
-        if token_expiry < now:
+        if token_expiry <= now:
             return None
 
-        # Mark token as used
-        token_record.is_used = True
+        user = (
+            await db.execute(
+                select(User)
+                .where(User.id == token_record.user_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not user:
+            return None
 
-        # Fetch and verify user
-        user = (await db.execute(select(User).where(User.id == token_record.user_id))).scalar_one_or_none()
-        if user:
-            user.is_verified = True
-            await db.commit()
-            return user
-
-        await db.commit()
-        return None
+        await db.execute(
+            update(EmailVerificationToken)
+            .where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.is_used.is_(False),
+            )
+            .values(is_used=True)
+        )
+        user.is_verified = True
+        return user
 
     @staticmethod
-    async def create_password_reset_token(user_id: int, db: AsyncSession, hours_valid: int = 2) -> str:
+    async def create_password_reset_token(
+        user_id: int,
+        db: AsyncSession,
+        hours_valid: int = 2,
+        commit: bool = True,
+    ) -> str:
         raw_token, token_hash = EmailService.generate_token()
         expires_at = datetime.now(timezone.utc) + timedelta(hours=hours_valid)
 
+        await db.execute(select(User.id).where(User.id == user_id).with_for_update())
+        await db.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.is_used.is_(False),
+            )
+            .values(is_used=True)
+        )
         token_record = PasswordResetToken(
             user_id=user_id,
             token_hash=token_hash,
@@ -89,7 +131,9 @@ class EmailService:
             is_used=False
         )
         db.add(token_record)
-        await db.commit()
+        await db.flush()
+        if commit:
+            await db.commit()
         return raw_token
 
     @staticmethod
@@ -99,8 +143,9 @@ class EmailService:
             select(PasswordResetToken)
             .where(
                 PasswordResetToken.token_hash == token_hash,
-                PasswordResetToken.is_used == False
+                PasswordResetToken.is_used.is_(False),
             )
+            .with_for_update()
         )
         result = await db.execute(stmt)
         token_record = result.scalar_one_or_none()
@@ -114,13 +159,20 @@ class EmailService:
         if token_expiry.tzinfo is None:
             token_expiry = token_expiry.replace(tzinfo=timezone.utc)
 
-        if token_expiry < now:
+        if token_expiry <= now:
             return None
 
-        # Mark token as used
+        user = (
+            await db.execute(
+                select(User)
+                .where(User.id == token_record.user_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not user:
+            return None
+
         token_record.is_used = True
-        user = (await db.execute(select(User).where(User.id == token_record.user_id))).scalar_one_or_none()
-        await db.commit()
         return user
 
     @staticmethod
@@ -133,7 +185,7 @@ class EmailService:
             f"{verification_link}\n\n"
             "This link expires in 24 hours.\n"
         )
-        return await EmailService._send_smtp(email, subject, body)
+        return await EmailService._send_email(email, subject, body)
 
     @staticmethod
     async def send_password_reset_email(email: str, raw_token: str, full_name: str = "User") -> bool:
@@ -145,7 +197,7 @@ class EmailService:
             f"{reset_link}\n\n"
             "This link expires in 2 hours.\n"
         )
-        return await EmailService._send_smtp(email, subject, body)
+        return await EmailService._send_email(email, subject, body)
 
     @staticmethod
     async def send_job_status_notification(
@@ -158,36 +210,81 @@ class EmailService:
         body = f"Your job '{job_title}' has status '{status}'."
         if reason:
             body += f"\n\nReason: {reason}"
-        return await EmailService._send_smtp(recruiter_email, subject, body)
+        return await EmailService._send_email(recruiter_email, subject, body)
+
+    @staticmethod
+    async def _send_email(to_email: str, subject: str, body: str) -> bool:
+        if settings.EMAIL_PROVIDER == "resend":
+            return await EmailService._send_resend(to_email, subject, body)
+        return await EmailService._send_smtp(to_email, subject, body)
+
+    @staticmethod
+    async def _send_resend(to_email: str, subject: str, body: str) -> bool:
+        if not settings.RESEND_API_KEY:
+            logger.warning("Email delivery failed: RESEND_API_KEY is not configured.")
+            return False
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}"},
+                    json={
+                        "from": settings.EMAIL_FROM,
+                        "to": [to_email],
+                        "subject": subject,
+                        "text": body,
+                    },
+                )
+            if response.is_success:
+                logger.info("Email delivery succeeded via Resend.")
+                return True
+
+            logger.error("Email delivery failed via Resend (HTTP %s).", response.status_code)
+            return False
+        except httpx.HTTPError as error:
+            logger.error(
+                "Email delivery failed via Resend (%s).",
+                type(error).__name__,
+            )
+            return False
 
     @staticmethod
     async def _send_smtp(to_email: str, subject: str, body: str) -> bool:
         if not settings.SMTP_HOST:
-            logging.warning("SMTP_HOST is not configured; email was not sent to %s", to_email)
+            logger.warning("Email delivery failed: SMTP_HOST is not configured.")
             return False
 
-        message = EmailMessage()
-        message["Subject"] = subject
-        message["From"] = settings.EMAIL_FROM
-        message["To"] = to_email
-        message.set_content(body)
-
-        def dispatch() -> None:
-            if settings.SMTP_USE_SSL:
-                server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
-            else:
-                server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
-
-            with server:
-                if settings.SMTP_USE_TLS and not settings.SMTP_USE_SSL:
-                    server.starttls()
-                if settings.SMTP_USERNAME:
-                    server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                server.send_message(message)
-
         try:
+            message = EmailMessage()
+            message["Subject"] = subject
+            message["From"] = settings.EMAIL_FROM
+            message["To"] = to_email
+            message.set_content(body)
+
+            def dispatch() -> None:
+                if settings.SMTP_USE_SSL:
+                    server = smtplib.SMTP_SSL(
+                        settings.SMTP_HOST, settings.SMTP_PORT, timeout=30
+                    )
+                else:
+                    server = smtplib.SMTP(
+                        settings.SMTP_HOST, settings.SMTP_PORT, timeout=30
+                    )
+
+                with server:
+                    if settings.SMTP_USE_TLS and not settings.SMTP_USE_SSL:
+                        server.starttls()
+                    if settings.SMTP_USERNAME:
+                        server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                    server.send_message(message)
+
             await asyncio.to_thread(dispatch)
+            logger.info("Email delivery succeeded via SMTP.")
             return True
-        except Exception:
-            logging.exception("SMTP delivery failed for %s", to_email)
+        except (OSError, smtplib.SMTPException, ValueError) as error:
+            logger.error(
+                "Email delivery failed via SMTP (%s).",
+                type(error).__name__,
+            )
             return False

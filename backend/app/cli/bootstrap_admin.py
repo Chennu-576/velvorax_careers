@@ -6,6 +6,7 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from sqlalchemy import select
+from email_validator import EmailNotValidError, validate_email
 
 # Add parent directory to sys.path to allow running standalone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -28,8 +29,17 @@ def validate_password_strength(password: str) -> bool:
     return True
 
 async def bootstrap_superadmin(email: str, password: str, full_name: str, phone: str = None):
-    if not email or "@" not in email:
+    try:
+        email = validate_email(
+            email.strip(), check_deliverability=False
+        ).normalized
+    except (EmailNotValidError, AttributeError):
         print("[ERROR] A valid email address is required.")
+        sys.exit(1)
+
+    full_name = full_name.strip()
+    if not full_name or len(full_name) > 255:
+        print("[ERROR] A valid administrator name is required.")
         sys.exit(1)
 
     if not validate_password_strength(password):

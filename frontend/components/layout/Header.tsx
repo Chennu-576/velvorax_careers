@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, UserCircle, LogOut, LayoutDashboard, ArrowRight } from "lucide-react";
 import Logo from "./Logo";
-import { getAuthToken, getAuthUser, clearAuth, User } from "@/lib/api";
+import { API_BASE_URL, getAuthToken, getAuthUser, clearAuth, User } from "@/lib/api";
 
 export default function Header() {
   const pathname = usePathname();
@@ -18,6 +18,21 @@ export default function Header() {
   }, [pathname]);
 
   const handleLogout = () => {
+    void fetch(`${API_BASE_URL}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...(getAuthToken()
+          ? { Authorization: `Bearer ${getAuthToken()}` }
+          : {}),
+      },
+    }).then((response) => {
+      if (!response.ok) {
+        console.error(`Logout request failed with HTTP ${response.status}.`);
+      }
+    }).catch((error: unknown) => {
+      console.error("Logout request failed.", error);
+    });
     clearAuth();
     setUser(null);
     router.push("/login");

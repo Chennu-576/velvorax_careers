@@ -1,14 +1,15 @@
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.permissions import get_current_user
-from app.models.user import User, AuditLog
+from app.models.user import User, AuditLog, EmailVerificationToken
 from app.models.candidate import CandidateProfile
 from app.models.company import Company, RecruiterProfile
 from app.services.email_service import EmailService
@@ -57,7 +58,7 @@ async def login(
             detail="Account is inactive. Please contact system support."
         )
 
-    if not user.is_verified and user.role not in ["ADMIN", "SUPER_ADMIN"]:
+    if not user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email address has not been verified. Please verify your email before logging in."
@@ -103,7 +104,7 @@ async def login(
         httponly=True,
         secure=settings.COOKIE_SECURE or settings.ENVIRONMENT.lower() == "production",
         samesite="none" if settings.ENVIRONMENT.lower() == "production" else settings.COOKIE_SAMESITE,
-        max_age=86400
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
 
     # 5. Record successful login audit
@@ -149,7 +150,6 @@ async def register_candidate(
         )
 
     # Create candidate user
-    is_auto_verified = settings.AUTO_VERIFY_NEW_USERS
     user = User(
         email=payload.email.lower().strip(),
         hashed_password=get_password_hash(payload.password),
@@ -157,7 +157,7 @@ async def register_candidate(
         phone=payload.phone.strip() if payload.phone else None,
         role="CANDIDATE",
         is_active=True,
-        is_verified=is_auto_verified
+        is_verified=False
     )
     db.add(user)
     await db.flush()
@@ -171,35 +171,39 @@ async def register_candidate(
     )
     db.add(profile)
 
-    # If verification required, dispatch token
-    verification_email_sent = False
-    if not is_auto_verified:
-        token = await EmailService.create_verification_token(user.id, db)
-        verification_email_sent = await EmailService.send_verification_email(user.email, token, user.full_name)
+    token = await EmailService.create_verification_token(user.id, db, commit=False)
 
-    # Audit log
     audit = AuditLog(
         user_id=user.id,
         action="REGISTER_CANDIDATE",
         resource="AUTH",
-        details=f"Candidate registered successfully (verified={is_auto_verified}).",
+        details="Candidate registered; email verification is required.",
         ip_address=request.client.host if request.client else None
     )
     db.add(audit)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    verification_email_sent = await EmailService.send_verification_email(
+        user.email, token, user.full_name
+    )
     await db.refresh(user)
 
     return RegistrationResponse(
         message=(
             "Registration successful. Please verify your email before logging in."
-            if not is_auto_verified and verification_email_sent
+            if verification_email_sent
             else "Registration successful, but the verification email could not be sent. Use resend verification."
-            if not is_auto_verified
-            else "Registration successful."
         ),
         email=user.email,
         is_verified=user.is_verified,
-        verification_required=not is_auto_verified,
+        verification_required=True,
         verification_email_sent=verification_email_sent
     )
 
@@ -247,7 +251,6 @@ async def register_recruiter(
         await db.flush()
 
     # Create recruiter user
-    is_auto_verified = settings.AUTO_VERIFY_NEW_USERS
     user = User(
         email=payload.work_email.lower().strip(),
         hashed_password=get_password_hash(payload.password),
@@ -255,7 +258,7 @@ async def register_recruiter(
         phone=payload.phone.strip() if payload.phone else None,
         role="RECRUITER",
         is_active=True,
-        is_verified=is_auto_verified
+        is_verified=False
     )
     db.add(user)
     await db.flush()
@@ -270,33 +273,39 @@ async def register_recruiter(
     )
     db.add(recruiter_profile)
 
-    verification_email_sent = False
-    if not is_auto_verified:
-        token = await EmailService.create_verification_token(user.id, db)
-        verification_email_sent = await EmailService.send_verification_email(user.email, token, user.full_name)
+    token = await EmailService.create_verification_token(user.id, db, commit=False)
 
     audit = AuditLog(
         user_id=user.id,
         action="REGISTER_RECRUITER",
         resource="AUTH",
-        details=f"Recruiter registered for company '{company.name}' (verified={is_auto_verified}).",
+        details=f"Recruiter registered for company '{company.name}'; email verification is required.",
         ip_address=request.client.host if request.client else None
     )
     db.add(audit)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account or company with these details already exists.",
+        )
+
+    verification_email_sent = await EmailService.send_verification_email(
+        user.email, token, user.full_name
+    )
     await db.refresh(user)
 
     return RegistrationResponse(
         message=(
             "Registration successful. Please verify your email before logging in."
-            if not is_auto_verified and verification_email_sent
+            if verification_email_sent
             else "Registration successful, but the verification email could not be sent. Use resend verification."
-            if not is_auto_verified
-            else "Registration successful."
         ),
         email=user.email,
         is_verified=user.is_verified,
-        verification_required=not is_auto_verified,
+        verification_required=True,
         verification_email_sent=verification_email_sent
     )
 
@@ -342,15 +351,61 @@ async def resend_verification(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    stmt = select(User).where(User.email == payload.email.lower().strip())
+    now = datetime.now(timezone.utc)
+    ip_address = request.client.host if request.client else None
+    if ip_address:
+        recent_requests = await db.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.action == "RESEND_VERIFICATION_REQUEST",
+                AuditLog.ip_address == ip_address,
+                AuditLog.created_at >= now - timedelta(minutes=1),
+            )
+        )
+        if recent_requests and recent_requests >= 5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many verification requests. Please try again in a minute.",
+                headers={"Retry-After": "60"},
+            )
+
+    stmt = (
+        select(User)
+        .where(User.email == payload.email.lower().strip())
+        .with_for_update()
+    )
     user = (await db.execute(stmt)).scalar_one_or_none()
-    if not user:
-        return {"message": "If an account exists with this email, a verification link has been sent."}
-    if user.is_verified:
-        return {"message": "Account is already verified. You can log in."}
-    token = await EmailService.create_verification_token(user.id, db)
-    await EmailService.send_verification_email(user.email, token, user.full_name)
-    return {"message": "If an account exists with this email, a verification link has been sent."}
+    raw_token = None
+    if user and not user.is_verified and user.is_active:
+        recent_user_tokens = await db.scalar(
+            select(func.count(EmailVerificationToken.id)).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.created_at >= now - timedelta(hours=1),
+            )
+        )
+        if not recent_user_tokens or recent_user_tokens < 5:
+            raw_token = await EmailService.create_verification_token(
+                user.id, db, commit=False
+            )
+
+    db.add(
+        AuditLog(
+            user_id=user.id if user else None,
+            action="RESEND_VERIFICATION_REQUEST",
+            resource="AUTH",
+            details="Verification email request received.",
+            ip_address=ip_address,
+        )
+    )
+    await db.commit()
+    verification_email_sent = False
+    if user and raw_token:
+        verification_email_sent = await EmailService.send_verification_email(
+            user.email, raw_token, user.full_name
+        )
+    return {
+        "message": "If an unverified account exists, we will send a verification link when possible.",
+        "verification_email_sent": verification_email_sent,
+    }
 
 @router.post("/forgot-password")
 async def forgot_password(
@@ -361,10 +416,11 @@ async def forgot_password(
     stmt = select(User).where(User.email == payload.email.lower().strip())
     user = (await db.execute(stmt)).scalar_one_or_none()
     if not user:
-        return {"message": "If an account exists with this email, a password reset link has been sent."}
-    token = await EmailService.create_password_reset_token(user.id, db)
+        return {"message": "If an account exists, we received the password reset request."}
+    token = await EmailService.create_password_reset_token(user.id, db, commit=False)
+    await db.commit()
     await EmailService.send_password_reset_email(user.email, token, user.full_name)
-    return {"message": "If an account exists with this email, a password reset link has been sent."}
+    return {"message": "If an account exists, we received the password reset request."}
 
 @router.post("/reset-password")
 async def reset_password(

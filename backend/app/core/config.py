@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
-    AUTO_VERIFY_NEW_USERS: bool = False
     SUPERADMIN_EMAIL: str = "admin@velvorax.tech"
     SUPERADMIN_PASSWORD: Optional[str] = None
     ENVIRONMENT: str = "development"
@@ -23,7 +22,9 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
 
-    # SMTP
+    # Email delivery
+    EMAIL_PROVIDER: Literal["resend", "smtp"] = "resend"
+    RESEND_API_KEY: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""
@@ -76,7 +77,6 @@ settings = Settings()
 #     SECRET_KEY: str
 #     ALGORITHM: str = "HS256"
 #     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
-#     AUTO_VERIFY_NEW_USERS: bool = False
 
 #     SUPERADMIN_EMAIL: Optional[str] = None
 #     SUPERADMIN_PASSWORD: Optional[str] = None
