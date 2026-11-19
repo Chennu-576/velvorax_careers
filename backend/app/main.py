@@ -168,6 +168,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://velvorax-careers.vercel.app",
+        *settings.CORS_ORIGINS,
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -19,6 +19,36 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const registeredEmail = searchParams.get("email");
+    if (registeredEmail) setEmail(registeredEmail);
+    if (searchParams.get("registered") === "1") {
+      setNotice(searchParams.get("verify") === "1"
+        ? "Registration successful. Check your email and verify your account before logging in."
+        : "Registration successful. You can log in now.");
+    }
+  }, [searchParams]);
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError("Enter your email address before requesting a password reset.");
+      return;
+    }
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      setNotice(res.ok ? data.message : "Unable to request a password reset.");
+    } catch {
+      setNotice("Unable to request a password reset.");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,6 +145,11 @@ function LoginForm() {
             <span className="leading-snug">{error}</span>
           </div>
         )}
+        {notice && (
+          <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 text-brand-success rounded-xl text-xs">
+            {notice}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
@@ -163,9 +198,9 @@ function LoginForm() {
               <input type="checkbox" className="accent-brand-yellow" defaultChecked />
               <span>Remember me</span>
             </label>
-            <span className="text-brand-corpBlue font-semibold hover:underline cursor-pointer">
+            <button type="button" onClick={handleForgotPassword} className="text-brand-corpBlue font-semibold hover:underline">
               Forgot password?
-            </span>
+            </button>
           </div>
 
           <button

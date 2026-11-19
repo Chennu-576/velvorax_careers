@@ -15,6 +15,7 @@ class CandidateRegisterRequest(BaseModel):
     country: Optional[str] = "India"
     state: Optional[str] = "Telangana"
     city: Optional[str] = "Hyderabad"
+    terms_accepted: bool = True
 
 class RecruiterRegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
@@ -26,6 +27,7 @@ class RecruiterRegisterRequest(BaseModel):
     designation: Optional[str] = "Talent Acquisition Specialist"
     password: str = Field(..., min_length=6)
     confirm_password: str
+    terms_accepted: bool = True
 
 class UserResponse(BaseModel):
     id: int
@@ -44,6 +46,13 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     user: UserResponse
+
+class RegistrationResponse(BaseModel):
+    message: str
+    email: str
+    is_verified: bool
+    verification_required: bool
+    verification_email_sent: bool = False
 
 class VerifyEmailRequest(BaseModel):
     token: str

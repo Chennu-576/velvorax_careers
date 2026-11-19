@@ -21,7 +21,8 @@ from app.schemas.auth import (
     VerifyEmailRequest,
     ResendVerificationRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest
+    ResetPasswordRequest,
+    RegistrationResponse
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -100,8 +101,8 @@ async def login(
         key="access_token",
         value=f"Bearer {access_token}",
         httponly=True,
-        secure=False,  # Set to True in HTTPS production
-        samesite="lax",
+        secure=settings.COOKIE_SECURE or settings.ENVIRONMENT.lower() == "production",
+        samesite="none" if settings.ENVIRONMENT.lower() == "production" else settings.COOKIE_SAMESITE,
         max_age=86400
     )
 
@@ -123,13 +124,15 @@ async def login(
         user=UserResponse.model_validate(user)
     )
 
-@router.post("/register/candidate", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register/candidate", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
 async def register_candidate(
     payload: CandidateRegisterRequest,
     response: Response,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
+    if not payload.terms_accepted:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms and privacy acceptance is required.")
     if payload.password != payload.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -169,9 +172,10 @@ async def register_candidate(
     db.add(profile)
 
     # If verification required, dispatch token
+    verification_email_sent = False
     if not is_auto_verified:
         token = await EmailService.create_verification_token(user.id, db)
-        await EmailService.send_verification_email(user.email, token, user.full_name)
+        verification_email_sent = await EmailService.send_verification_email(user.email, token, user.full_name)
 
     # Audit log
     audit = AuditLog(
@@ -185,35 +189,29 @@ async def register_candidate(
     await db.commit()
     await db.refresh(user)
 
-    access_token = create_access_token(
-        subject=user.email,
-        role=user.role,
-        user_id=user.id
+    return RegistrationResponse(
+        message=(
+            "Registration successful. Please verify your email before logging in."
+            if not is_auto_verified and verification_email_sent
+            else "Registration successful, but the verification email could not be sent. Use resend verification."
+            if not is_auto_verified
+            else "Registration successful."
+        ),
+        email=user.email,
+        is_verified=user.is_verified,
+        verification_required=not is_auto_verified,
+        verification_email_sent=verification_email_sent
     )
 
-    response.set_cookie(
-        key="access_token",
-        value=f"Bearer {access_token}",
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=86400
-    )
-
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        role=user.role,
-        user=UserResponse.model_validate(user)
-    )
-
-@router.post("/register/recruiter", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register/recruiter", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
 async def register_recruiter(
     payload: RecruiterRegisterRequest,
     response: Response,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
+    if not payload.terms_accepted:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms and privacy acceptance is required.")
     if payload.password != payload.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -270,9 +268,10 @@ async def register_recruiter(
     )
     db.add(recruiter_profile)
 
+    verification_email_sent = False
     if not is_auto_verified:
         token = await EmailService.create_verification_token(user.id, db)
-        await EmailService.send_verification_email(user.email, token, user.full_name)
+        verification_email_sent = await EmailService.send_verification_email(user.email, token, user.full_name)
 
     audit = AuditLog(
         user_id=user.id,
@@ -285,26 +284,18 @@ async def register_recruiter(
     await db.commit()
     await db.refresh(user)
 
-    access_token = create_access_token(
-        subject=user.email,
-        role=user.role,
-        user_id=user.id
-    )
-
-    response.set_cookie(
-        key="access_token",
-        value=f"Bearer {access_token}",
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=86400
-    )
-
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        role=user.role,
-        user=UserResponse.model_validate(user)
+    return RegistrationResponse(
+        message=(
+            "Registration successful. Please verify your email before logging in."
+            if not is_auto_verified and verification_email_sent
+            else "Registration successful, but the verification email could not be sent. Use resend verification."
+            if not is_auto_verified
+            else "Registration successful."
+        ),
+        email=user.email,
+        is_verified=user.is_verified,
+        verification_required=not is_auto_verified,
+        verification_email_sent=verification_email_sent
     )
 
 @router.get("/me", response_model=UserResponse)
@@ -313,7 +304,11 @@ async def get_me(current_user: User = Depends(get_current_user)) -> Any:
 
 @router.post("/logout")
 async def logout(response: Response) -> Any:
-    response.delete_cookie(key="access_token")
+    response.delete_cookie(
+        key="access_token",
+        secure=settings.COOKIE_SECURE or settings.ENVIRONMENT.lower() == "production",
+        samesite="none" if settings.ENVIRONMENT.lower() == "production" else settings.COOKIE_SAMESITE,
+    )
     return {"message": "Successfully logged out."}
 
 @router.post("/verify-email")

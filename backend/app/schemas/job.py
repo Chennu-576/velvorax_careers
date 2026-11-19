@@ -83,6 +83,8 @@ class JobUpdate(BaseModel):
     openings: Optional[int] = None
     status: Optional[str] = None
     is_featured: Optional[bool] = None
+    application_deadline: Optional[datetime] = None
+    skills: Optional[List[str]] = None
 
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

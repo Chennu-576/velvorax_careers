@@ -19,6 +19,7 @@ from app.models.candidate import (
     SavedJob
 )
 from app.models.job import Job
+from app.models.application import Application
 from app.schemas.candidate import (
     CandidateProfileResponse,
     CandidateProfileUpdate,
@@ -84,12 +85,69 @@ async def update_my_profile(
         profile = CandidateProfile(user_id=current_user.id)
         db.add(profile)
 
-    for field, val in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    for field in ("full_name", "phone"):
+        val = update_data.pop(field, None)
+        if val is not None:
+            setattr(current_user, field, val)
+
+    for field, val in update_data.items():
         setattr(profile, field, val)
 
     await db.commit()
     await db.refresh(profile)
     return CandidateProfileResponse.model_validate(profile)
+
+async def _get_or_create_profile(current_user: User, db: AsyncSession) -> CandidateProfile:
+    profile = (
+        await db.execute(
+            select(CandidateProfile).where(CandidateProfile.user_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+    if not profile:
+        profile = CandidateProfile(user_id=current_user.id)
+        db.add(profile)
+        await db.flush()
+    return profile
+
+@router.post("/me/education", response_model=EducationResponse, status_code=status.HTTP_201_CREATED)
+async def add_education(
+    payload: EducationCreate,
+    current_user: User = Depends(require_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await _get_or_create_profile(current_user, db)
+    item = CandidateEducation(candidate_id=profile.id, **payload.model_dump())
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return EducationResponse.model_validate(item)
+
+@router.post("/me/experience", response_model=ExperienceResponse, status_code=status.HTTP_201_CREATED)
+async def add_experience(
+    payload: ExperienceCreate,
+    current_user: User = Depends(require_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await _get_or_create_profile(current_user, db)
+    item = CandidateExperience(candidate_id=profile.id, **payload.model_dump())
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return ExperienceResponse.model_validate(item)
+
+@router.post("/me/skills", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
+async def add_skill(
+    payload: SkillItem,
+    current_user: User = Depends(require_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await _get_or_create_profile(current_user, db)
+    item = CandidateSkill(candidate_id=profile.id, **payload.model_dump())
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return SkillResponse.model_validate(item)
 
 # Resumes Management
 @router.post("/me/resumes", response_model=ResumeResponse, status_code=status.HTTP_201_CREATED)
@@ -158,6 +216,28 @@ async def download_resume(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this resume.")
     elif current_user.role not in ["ADMIN", "SUPER_ADMIN", "RECRUITER"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this resume.")
+    elif current_user.role == "RECRUITER":
+        from app.models.company import RecruiterProfile
+        rec_profile = (
+            await db.execute(
+                select(RecruiterProfile).where(RecruiterProfile.user_id == current_user.id)
+            )
+        ).scalar_one_or_none()
+        if not rec_profile:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruiter profile not found.")
+        authorized = (
+            await db.execute(
+                select(Application.id)
+                .join(Job, Application.job_id == Job.id)
+                .where(
+                    Application.candidate_id == resume.candidate_id,
+                    Job.company_id == rec_profile.company_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if not authorized:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this resume.")
 
     # If Vercel blob URL
     if resume.blob_url and resume.blob_url.startswith("http"):

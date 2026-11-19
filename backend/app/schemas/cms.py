@@ -1,8 +1,10 @@
+from pydantic import ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel
 
 class CMSContentUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     title: Optional[str] = None
     subtitle: Optional[str] = None
     body: Optional[str] = None

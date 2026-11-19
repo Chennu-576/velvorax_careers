@@ -25,6 +25,46 @@ from app.schemas.candidate import ResumeResponse
 
 router = APIRouter(tags=["Applications & ATS"])
 
+@router.get("/notifications")
+async def list_notifications(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Notification).where(Notification.user_id == current_user.id).order_by(desc(Notification.created_at))
+    notifications = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": item.id,
+            "title": item.title,
+            "message": item.message,
+            "type": item.type,
+            "is_read": item.is_read,
+            "action_url": item.action_url,
+            "created_at": item.created_at,
+        }
+        for item in notifications
+    ]
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    notification = (
+        await db.execute(
+            select(Notification).where(
+                Notification.id == notification_id,
+                Notification.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not notification:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
+    notification.is_read = True
+    await db.commit()
+    return {"message": "Notification marked as read."}
+
 @router.post("/applications", response_model=ApplicationResponse, status_code=status.HTTP_201_CREATED)
 async def submit_application(
     payload: ApplicationCreate,
@@ -109,6 +149,17 @@ async def submit_application(
         action_url=f"/candidate/applications"
     )
     db.add(cand_notif)
+
+    recruiter_stmt = select(RecruiterProfile).where(RecruiterProfile.company_id == job.company_id)
+    recruiter_profiles = (await db.execute(recruiter_stmt)).scalars().all()
+    for recruiter_profile in recruiter_profiles:
+        db.add(Notification(
+            user_id=recruiter_profile.user_id,
+            title="New Job Application",
+            message=f"{current_user.full_name} applied for '{job.title}'.",
+            type="APPLICATION",
+            action_url="/recruiter/dashboard"
+        ))
 
     await db.commit()
 
@@ -230,8 +281,20 @@ async def update_application_status(
     if not application:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
 
+    if current_user.role == "RECRUITER":
+        rec_stmt = select(RecruiterProfile).where(RecruiterProfile.user_id == current_user.id)
+        rec_profile = (await db.execute(rec_stmt)).scalar_one_or_none()
+        if not rec_profile or not application.job or rec_profile.company_id != application.job.company_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to modify this application.")
+
     old_status = application.status
     new_status = payload.status.upper()
+    allowed_statuses = {
+        "APPLIED", "UNDER_REVIEW", "SHORTLISTED", "INTERVIEW_SCHEDULED",
+        "INTERVIEW_COMPLETED", "SELECTED", "REJECTED", "WITHDRAWN"
+    }
+    if new_status not in allowed_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid application status.")
     application.status = new_status
     application.updated_at = datetime.now(timezone.utc)
 
@@ -277,6 +340,12 @@ async def schedule_interview(
     if not application:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
 
+    if current_user.role == "RECRUITER":
+        rec_stmt = select(RecruiterProfile).where(RecruiterProfile.user_id == current_user.id)
+        rec_profile = (await db.execute(rec_stmt)).scalar_one_or_none()
+        if not rec_profile or not application.job or rec_profile.company_id != application.job.company_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to schedule this interview.")
+
     interview = Interview(
         application_id=payload.application_id,
         scheduled_by_recruiter_id=current_user.id,
@@ -290,10 +359,11 @@ async def schedule_interview(
     db.add(interview)
 
     # Update application status to INTERVIEW_SCHEDULED
+    old_status = application.status
     application.status = "INTERVIEW_SCHEDULED"
     history = ApplicationStatusHistory(
         application_id=application.id,
-        previous_status=application.status,
+        previous_status=old_status,
         new_status="INTERVIEW_SCHEDULED",
         changed_by_user_id=current_user.id,
         notes=f"Interview scheduled for {payload.scheduled_time} ({payload.interview_type})."

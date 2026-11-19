@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User, Building, Mail, Lock, Phone, MapPin, AlertCircle, ArrowRight, CheckCircle2 } from "lucide-react";
 import Logo from "@/components/layout/Logo";
-import { API_BASE_URL, saveAuth } from "@/lib/api";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -63,6 +63,7 @@ export default function RegisterPage() {
             country,
             state,
             city,
+            terms_accepted: termsAccepted,
           }),
         });
 
@@ -71,8 +72,7 @@ export default function RegisterPage() {
           throw new Error(data.detail || "Candidate registration failed.");
         }
 
-        saveAuth(data.access_token, data.user);
-        router.push("/candidate/dashboard");
+        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=${data.verification_required ? "1" : "0"}`);
       } else {
         // Recruiter Registration
         const res = await fetch(`${API_BASE_URL}/auth/register/recruiter`, {
@@ -88,6 +88,7 @@ export default function RegisterPage() {
             designation: designation.trim(),
             password,
             confirm_password: confirmPassword,
+            terms_accepted: termsAccepted,
           }),
         });
 
@@ -96,8 +97,7 @@ export default function RegisterPage() {
           throw new Error(data.detail || "Recruiter registration failed.");
         }
 
-        saveAuth(data.access_token, data.user);
-        router.push("/recruiter/dashboard");
+        router.push(`/login?registered=1&email=${encodeURIComponent(data.email)}&verify=${data.verification_required ? "1" : "0"}`);
       }
     } catch (err: any) {
       setError(err.message);

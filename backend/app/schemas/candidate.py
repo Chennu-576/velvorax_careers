@@ -85,6 +85,8 @@ class CertificationResponse(CertificationBase):
         from_attributes = True
 
 class CandidateProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
     headline: Optional[str] = None
     summary: Optional[str] = None
     avatar_url: Optional[str] = None

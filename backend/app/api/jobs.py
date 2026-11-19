@@ -150,7 +150,7 @@ async def get_job_by_slug_or_id(
 
     stmt = (
         select(Job)
-        .where(condition)
+        .where(condition, Job.status == "PUBLISHED")
         .options(
             selectinload(Job.company),
             selectinload(Job.category),
@@ -285,6 +285,7 @@ async def update_job(
 
     # Apply updates
     update_data = payload.model_dump(exclude_unset=True)
+    skills = update_data.pop("skills", None)
     for field, val in update_data.items():
         if field == "status" and current_user.role == "RECRUITER":
             if val.upper() in ["PUBLISHED", "APPROVED"]:
@@ -293,6 +294,14 @@ async def update_job(
                     detail="Recruiters cannot publish vacancies directly. Vacancies must be submitted for Admin approval."
                 )
         setattr(job, field, val)
+
+    if skills is not None:
+        for skill in list(job.skills):
+            await db.delete(skill)
+        await db.flush()
+        for skill_name in skills:
+            if skill_name.strip():
+                db.add(JobSkill(job_id=job.id, skill_name=skill_name.strip(), is_required=True))
 
     # Recruiter lifecycle state machine: If rejected job is edited by recruiter, reset to PENDING_APPROVAL
     if current_user.role == "RECRUITER" and job.status == "REJECTED":

@@ -18,6 +18,19 @@ class Settings(BaseSettings):
     AUTO_VERIFY_NEW_USERS: bool = False
     SUPERADMIN_EMAIL: str = "admin@velvorax.tech"
     SUPERADMIN_PASSWORD: Optional[str] = None
+    ENVIRONMENT: str = "development"
+    FRONTEND_URL: str = "https://velvorax-careers.vercel.app"
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
+
+    # SMTP
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    EMAIL_FROM: str = "no-reply@velvorax.tech"
 
     # Vercel Blob / Resume Storage
     BLOB_READ_WRITE_TOKEN: str = ""
