@@ -65,8 +65,10 @@ workspace.
 ## Deployment status
 
 The public Render health endpoint and Vercel site responded successfully during this
-audit. Render/Vercel environment settings were not inspectable or changed from this
-workspace. Production delivery remains dependent on configuring `EMAIL_PROVIDER`,
-`RESEND_API_KEY`, `EMAIL_FROM`, `FRONTEND_URL`, and `CORS_ORIGINS` in Render and
-`NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` in Vercel. No commit, push, or deployment
-was performed.
+audit. Commit `df97461` was pushed to `main`, but the repository has no GitHub Actions
+workflows, and the newly added API/frontend routes still returned 404 after the push.
+Render/Vercel environment settings were not inspectable or changed from this
+workspace, and no deployment controls are available here. Production delivery remains
+dependent on configuring `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`,
+`FRONTEND_URL`, and `CORS_ORIGINS` in Render and `NEXT_PUBLIC_API_URL` /
+`NEXT_PUBLIC_APP_URL` in Vercel, then deploying both services.
