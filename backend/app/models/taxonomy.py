@@ -16,9 +16,9 @@ class JobCategory(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -38,7 +38,7 @@ class JobSubcategory(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     category = relationship("JobCategory", back_populates="subcategories")

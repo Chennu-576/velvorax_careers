@@ -1,6 +1,6 @@
 from typing import Optional, List
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from pydantic import BaseModel, field_validator
 from app.schemas.job import JobResponse
 from app.schemas.candidate import ResumeResponse
 
@@ -20,6 +20,13 @@ class InterviewCreate(BaseModel):
     timezone_str: str = "Asia/Kolkata"
     meeting_link: Optional[str] = None
     location_details: Optional[str] = None
+
+    @field_validator("scheduled_time")
+    @classmethod
+    def scheduled_time_is_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Interview time must include a timezone.")
+        return value.astimezone(timezone.utc)
 
 class InterviewResponse(BaseModel):
     id: int

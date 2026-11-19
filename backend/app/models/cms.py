@@ -16,7 +16,7 @@ class CMSContent(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -30,7 +30,7 @@ class Announcement(Base):
     announcement_type: Mapped[str] = mapped_column(String(50), default="INFO")  # INFO, ALERT, BANNER
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class PlatformSetting(Base):
     __tablename__ = "platform_settings"

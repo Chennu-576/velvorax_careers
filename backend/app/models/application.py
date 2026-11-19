@@ -18,9 +18,9 @@ class Application(Base):
     status: Mapped[str] = mapped_column(String(50), default="APPLIED", index=True)
     recruiter_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1 to 5 stars
     
-    applied_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -42,7 +42,7 @@ class ApplicationStatusHistory(Base):
     new_status: Mapped[str] = mapped_column(String(50), nullable=False)
     changed_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     application = relationship("Application", back_populates="history")
 
@@ -53,7 +53,7 @@ class RecruiterNote(Base):
     application_id: Mapped[int] = mapped_column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
     recruiter_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     note: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     application = relationship("Application", back_populates="notes")
 
@@ -65,7 +65,7 @@ class Interview(Base):
     scheduled_by_recruiter_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
     interview_type: Mapped[str] = mapped_column(String(50), default="Video")  # Screening, Technical, HR, Managerial, In-Person
-    scheduled_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    scheduled_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     timezone_str: Mapped[str] = mapped_column(String(50), default="Asia/Kolkata")
     meeting_link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     location_details: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -75,9 +75,9 @@ class Interview(Base):
     feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )

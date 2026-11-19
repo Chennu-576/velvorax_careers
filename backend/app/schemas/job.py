@@ -1,6 +1,6 @@
 from typing import Optional, List
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict, field_validator
 
 class JobSkillSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -55,6 +55,15 @@ class JobCreate(BaseModel):
     application_deadline: Optional[datetime] = None
     skills: List[str] = []
 
+    @field_validator("application_deadline")
+    @classmethod
+    def deadline_is_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("Application deadline must include a timezone.")
+            return value.astimezone(timezone.utc)
+        return value
+
 class JobUpdate(BaseModel):
     title: Optional[str] = None
     category_id: Optional[int] = None
@@ -85,6 +94,15 @@ class JobUpdate(BaseModel):
     is_featured: Optional[bool] = None
     application_deadline: Optional[datetime] = None
     skills: Optional[List[str]] = None
+
+    @field_validator("application_deadline")
+    @classmethod
+    def deadline_is_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("Application deadline must include a timezone.")
+            return value.astimezone(timezone.utc)
+        return value
 
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

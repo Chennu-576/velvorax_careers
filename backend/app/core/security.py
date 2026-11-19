@@ -6,14 +6,17 @@ from app.core.config import settings
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        pwd_bytes = plain_password.encode("utf-8")
+        # Older accounts may have been hashed with bcrypt's 72-byte truncation.
+        pwd_bytes = plain_password.encode("utf-8")[:72]
         hash_bytes = hashed_password.encode("utf-8")
         return bcrypt.checkpw(pwd_bytes, hash_bytes)
     except Exception:
         return False
 
 def get_password_hash(password: str) -> str:
-    pwd_bytes = password.encode("utf-8")[:72]
+    pwd_bytes = password.encode("utf-8")
+    if len(pwd_bytes) > 72:
+        raise ValueError("Password must be no more than 72 UTF-8 bytes.")
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(pwd_bytes, salt)
     return hashed.decode("utf-8")

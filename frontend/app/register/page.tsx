@@ -26,6 +26,8 @@ export default function RegisterPage() {
   // Recruiter specific state
   const [companyName, setCompanyName] = useState("");
   const [companyWebsite, setCompanyWebsite] = useState("");
+  const [companyGstin, setCompanyGstin] = useState("");
+  const [companyCin, setCompanyCin] = useState("");
   const [companyLocation, setCompanyLocation] = useState("Hyderabad, India");
   const [designation, setDesignation] = useState("Talent Acquisition Specialist");
 
@@ -84,6 +86,8 @@ export default function RegisterPage() {
             phone: phone.trim() || undefined,
             company_name: companyName.trim(),
             company_website: companyWebsite.trim() || undefined,
+            company_gstin: companyGstin.trim() || undefined,
+            company_cin: companyCin.trim() || undefined,
             company_location: companyLocation.trim(),
             designation: designation.trim(),
             password,
@@ -237,6 +241,29 @@ export default function RegisterPage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-brand-deepNavy mb-1">GSTIN (optional)</label>
+                    <input
+                      type="text"
+                      maxLength={15}
+                      value={companyGstin}
+                      onChange={(e) => setCompanyGstin(e.target.value.toUpperCase())}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-brand-border bg-white text-xs font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-brand-deepNavy mb-1">CIN (optional)</label>
+                    <input
+                      type="text"
+                      maxLength={21}
+                      value={companyCin}
+                      onChange={(e) => setCompanyCin(e.target.value.toUpperCase())}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-brand-border bg-white text-xs font-medium"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block font-bold text-brand-deepNavy mb-1">
                     Company Website
@@ -327,7 +354,9 @@ export default function RegisterPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
+                minLength={8}
+                maxLength={72}
+                placeholder="At least 8 characters"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-brand-border focus:outline-brand-yellow text-xs font-medium"
               />
             </div>
@@ -341,6 +370,8 @@ export default function RegisterPage() {
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                minLength={8}
+                maxLength={72}
                 placeholder="Re-enter password"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-brand-border focus:outline-brand-yellow text-xs font-medium"
               />

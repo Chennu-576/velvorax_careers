@@ -1,8 +1,8 @@
-from typing import List, Union, Optional
+from pathlib import Path
+from typing import List, Optional
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl, field_validator
-import os
-import json
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "VELVORAX Careers API"
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
     # Security & Verification
-    SECRET_KEY: str = "velvorax_careers_production_super_secret_jwt_key_2026"
+    SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     AUTO_VERIFY_NEW_USERS: bool = False
@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
-    EMAIL_FROM: str = "no-reply@velvorax.tech"
+    EMAIL_FROM: str = Field(
+        default="no-reply@velvorax.tech",
+        validation_alias=AliasChoices("EMAIL_FROM", "SMTP_FROM_EMAIL"),
+    )
 
     # Vercel Blob / Resume Storage
     BLOB_READ_WRITE_TOKEN: str = ""
@@ -41,11 +44,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:3001"
+        "http://localhost:3001",
+        "https://velvorax-careers.vercel.app",
     ]
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parents[2] / ".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )

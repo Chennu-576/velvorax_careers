@@ -107,6 +107,20 @@ async def submit_application(
 
     # 4. Resolve Resume
     resume_id = payload.resume_id
+    if resume_id:
+        resume = (
+            await db.execute(
+                select(Resume).where(
+                    Resume.id == resume_id,
+                    Resume.candidate_id == candidate_profile.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not resume:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only apply with a resume from your own profile.",
+            )
     if not resume_id:
         def_res_stmt = select(Resume).where(
             Resume.candidate_id == candidate_profile.id,

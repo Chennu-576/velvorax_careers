@@ -12,6 +12,9 @@ class Company(Base):
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    gstin: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    cin: Mapped[Optional[str]] = mapped_column(String(21), nullable=True)
+    registration_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     company_size: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     headquarters: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -23,10 +26,15 @@ class Company(Base):
     
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_hiring_partner: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    verification_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -46,9 +54,9 @@ class RecruiterProfile(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )

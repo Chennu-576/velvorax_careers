@@ -50,6 +50,25 @@ function LoginForm() {
     }
   };
 
+  const handleResendVerification = async () => {
+    if (!email) {
+      setError("Enter your email address before requesting a verification link.");
+      return;
+    }
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/resend-verification`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      setNotice(res.ok ? data.message : "Unable to resend the verification link.");
+    } catch {
+      setNotice("Unable to resend the verification link.");
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -198,9 +217,14 @@ function LoginForm() {
               <input type="checkbox" className="accent-brand-yellow" defaultChecked />
               <span>Remember me</span>
             </label>
-            <button type="button" onClick={handleForgotPassword} className="text-brand-corpBlue font-semibold hover:underline">
-              Forgot password?
-            </button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleResendVerification} className="text-brand-corpBlue font-semibold hover:underline">
+                Resend verification
+              </button>
+              <button type="button" onClick={handleForgotPassword} className="text-brand-corpBlue font-semibold hover:underline">
+                Forgot password?
+              </button>
+            </div>
           </div>
 
           <button

@@ -23,14 +23,14 @@ class Invoice(Base):
     # Status: DRAFT, ISSUED, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED
     status: Mapped[str] = mapped_column(String(50), default="DRAFT", index=True)
     due_date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -65,6 +65,6 @@ class Payment(Base):
     payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     invoice = relationship("Invoice", back_populates="payments")

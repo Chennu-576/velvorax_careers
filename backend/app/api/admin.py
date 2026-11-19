@@ -54,6 +54,10 @@ class CompanyAdminView(BaseModel):
     name: str
     slug: str
     website: Optional[str] = None
+    gstin: Optional[str] = None
+    cin: Optional[str] = None
+    registration_number: Optional[str] = None
+    verification_notes: Optional[str] = None
     country: Optional[str] = None
     city: Optional[str] = None
     is_verified: bool
@@ -153,6 +157,7 @@ async def verify_company(
     company_id: int,
     is_verified: bool = Query(...),
     is_hiring_partner: Optional[bool] = Query(None),
+    verification_notes: Optional[str] = Query(None, max_length=2000),
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
@@ -161,8 +166,18 @@ async def verify_company(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found.")
 
     comp.is_verified = is_verified
+    comp.verification_notes = verification_notes.strip() if verification_notes else None
+    comp.verified_at = datetime.now(timezone.utc) if is_verified else None
+    comp.verified_by_user_id = current_user.id if is_verified else None
     if is_hiring_partner is not None:
         comp.is_hiring_partner = is_hiring_partner
+    recruiter_profiles = (
+        await db.execute(
+            select(RecruiterProfile).where(RecruiterProfile.company_id == company_id)
+        )
+    ).scalars()
+    for profile in recruiter_profiles:
+        profile.is_approved = is_verified
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -215,6 +230,11 @@ async def approve_job(
     job = (await db.execute(stmt)).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    if not job.company or not job.company.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Verify the employer company before approving its jobs."
+        )
 
     job.status = "PUBLISHED"
     job.rejection_reason = None

@@ -19,7 +19,7 @@ import {
   History,
   AlertTriangle
 } from "lucide-react";
-import { API_BASE_URL, getAuthToken, getAuthUser } from "@/lib/api";
+import { API_BASE_URL, formatISTDate, getAuthToken, getAuthUser } from "@/lib/api";
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -96,14 +96,31 @@ export default function AdminDashboardPage() {
   };
 
   const handleVerifyCompany = async (companyId: number, currentVerified: boolean) => {
+    const verificationNotes = window.prompt(
+      currentVerified
+        ? "Why are you revoking this company's verification?"
+        : "Record the manual verification notes and documents checked:"
+    );
+    if (verificationNotes === null || !verificationNotes.trim()) return;
+
     const token = getAuthToken();
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/companies/${companyId}/verify?is_verified=${!currentVerified}&is_hiring_partner=true`, {
+      const params = new URLSearchParams({
+        is_verified: String(!currentVerified),
+        is_hiring_partner: String(!currentVerified),
+        verification_notes: verificationNotes.trim(),
+      });
+      const res = await fetch(`${API_BASE_URL}/admin/companies/${companyId}/verify?${params}`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        setCompanies(companies.map((c) => (c.id === companyId ? { ...c, is_verified: !currentVerified, is_hiring_partner: true } : c)));
+        setCompanies(companies.map((c) => (c.id === companyId ? {
+          ...c,
+          is_verified: !currentVerified,
+          is_hiring_partner: !currentVerified,
+          verification_notes: verificationNotes.trim(),
+        } : c)));
       }
     } catch (err) {
       console.error(err);
@@ -410,7 +427,7 @@ export default function AdminDashboardPage() {
             {companies.map((c) => (
               <div
                 key={c.id}
-                className="p-4 rounded-2xl border border-brand-border bg-brand-softBg flex items-center justify-between"
+                className="p-4 rounded-2xl border border-brand-border bg-brand-softBg flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div>
                   <h4 className="font-bold text-xs text-brand-deepNavy">{c.name}</h4>
@@ -418,6 +435,14 @@ export default function AdminDashboardPage() {
                     {c.city || c.country || "Global"} •{" "}
                     {c.is_verified ? "Verified Partner" : "Unverified"}
                   </span>
+                  <p className="mt-1 text-[11px] text-brand-textSecondary">
+                    GSTIN: {c.gstin || "Not provided"} • CIN: {c.cin || "Not provided"}
+                  </p>
+                  {c.verification_notes && (
+                    <p className="mt-1 text-[11px] text-brand-textSecondary">
+                      Review notes: {c.verification_notes}
+                    </p>
+                  )}
                 </div>
 
                 <button
@@ -532,7 +557,7 @@ export default function AdminDashboardPage() {
                   <span className="text-brand-textSecondary block mt-0.5">{log.details}</span>
                 </div>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  {new Date(log.created_at).toLocaleTimeString()}
+                  {formatISTDate(log.created_at, true)}
                 </span>
               </div>
             ))}

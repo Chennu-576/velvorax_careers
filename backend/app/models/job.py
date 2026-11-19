@@ -47,21 +47,21 @@ class Job(Base):
     qualifications: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     benefits: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     openings: Mapped[int] = mapped_column(Integer, default=1)
-    application_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    application_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Lifecycle & Status: DRAFT, PENDING_APPROVAL, PUBLISHED, REJECTED, PAUSED, CLOSED, ARCHIVED
     status: Mapped[str] = mapped_column(String(50), default="PENDING_APPROVAL", index=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     approved_by_admin_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     views_count: Mapped[int] = mapped_column(Integer, default=0)
     applications_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )

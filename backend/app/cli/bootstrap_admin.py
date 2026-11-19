@@ -10,12 +10,12 @@ from sqlalchemy import select
 # Add parent directory to sys.path to allow running standalone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from app.core.database import async_session_maker, engine, Base
+from app.core.database import async_session_maker
 from app.core.security import get_password_hash
 from app.models.user import User, AuditLog
 
 def validate_password_strength(password: str) -> bool:
-    if len(password) < 8:
+    if len(password) < 8 or len(password.encode("utf-8")) > 72:
         return False
     if not re.search(r'[A-Z]', password):
         return False
@@ -40,10 +40,6 @@ async def bootstrap_superadmin(email: str, password: str, full_name: str, phone:
         print("  - At least one numerical digit (0-9)")
         print("  - At least one special symbol (!@#$%^&*...)")
         sys.exit(1)
-
-    # Initialize tables if not already created
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     async with async_session_maker() as session:
         stmt = select(User).where(User.email == email.lower().strip())
@@ -99,14 +95,13 @@ async def bootstrap_superadmin(email: str, password: str, full_name: str, phone:
 def main():
     parser = argparse.ArgumentParser(description="VELVORAX CAREERS - Secure Super Admin Bootstrapper")
     parser.add_argument("--email", help="Super Admin Email address")
-    parser.add_argument("--password", help="Super Admin Password")
     parser.add_argument("--name", help="Super Admin Full Name")
     parser.add_argument("--phone", help="Super Admin Phone Number")
 
     args = parser.parse_args()
 
     email = args.email or os.getenv("SUPERADMIN_EMAIL")
-    password = args.password or os.getenv("SUPERADMIN_PASSWORD")
+    password = os.getenv("SUPERADMIN_PASSWORD")
     name = args.name or os.getenv("SUPERADMIN_NAME", "Velvorax Super Administrator")
     phone = args.phone or os.getenv("SUPERADMIN_PHONE", "+91 9985201116")
 

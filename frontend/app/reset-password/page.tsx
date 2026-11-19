@@ -51,9 +51,9 @@ function ResetPasswordForm() {
         {error && <p className="mt-4 rounded-xl bg-red-50 p-3 text-xs text-brand-error">{error}</p>}
         {message && <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-xs text-brand-success">{message}</p>}
         <label className="mt-5 block text-xs font-bold text-brand-deepNavy">New password</label>
-        <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-brand-border px-3.5 py-3 text-sm" />
+        <input type="password" required minLength={8} maxLength={72} value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-brand-border px-3.5 py-3 text-sm" />
         <label className="mt-4 block text-xs font-bold text-brand-deepNavy">Confirm password</label>
-        <input type="password" required minLength={6} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-brand-border px-3.5 py-3 text-sm" />
+        <input type="password" required minLength={8} maxLength={72} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-1 w-full rounded-xl border border-brand-border px-3.5 py-3 text-sm" />
         <button disabled={loading} className="mt-5 w-full rounded-xl bg-brand-yellow px-5 py-3 text-sm font-extrabold text-brand-deepNavy">
           {loading ? "Updating..." : "Reset Password"}
         </button>

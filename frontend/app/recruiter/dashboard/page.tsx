@@ -19,7 +19,7 @@ import {
   Settings,
   AlertCircle
 } from "lucide-react";
-import { API_BASE_URL, getAuthToken, getAuthUser } from "@/lib/api";
+import { API_BASE_URL, formatISTDate, getAuthToken, getAuthUser } from "@/lib/api";
 
 export default function RecruiterDashboardPage() {
   const router = useRouter();
@@ -51,6 +51,7 @@ export default function RecruiterDashboardPage() {
   const [skillsStr, setSkillsStr] = useState("Python, React, TypeScript, SQL");
   const [creatingJob, setCreatingJob] = useState(false);
   const [jobCreatedMsg, setJobCreatedMsg] = useState(false);
+  const [companyUpdateMessage, setCompanyUpdateMessage] = useState<string | null>(null);
 
   // Interview Schedule Modal State
   const [interviewModalOpen, setInterviewModalOpen] = useState(false);
@@ -156,6 +157,36 @@ export default function RecruiterDashboardPage() {
     }
   };
 
+  const handleUpdateCompanyRegistration = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const token = getAuthToken();
+    setCompanyUpdateMessage(null);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/recruiters/company`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          gstin: String(formData.get("gstin") || "").trim() || null,
+          cin: String(formData.get("cin") || "").trim() || null,
+          registration_number: String(formData.get("registration_number") || "").trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unable to update company registration details.");
+      setCompany(data);
+      setCompanyUpdateMessage(
+        "Registration details saved. An administrator must review changes before job posting is enabled."
+      );
+    } catch (error) {
+      setCompanyUpdateMessage(error instanceof Error ? error.message : "Unable to update company details.");
+    }
+  };
+
   const handleUpdateStatus = async (appId: number, newStatus: string) => {
     const token = getAuthToken();
     try {
@@ -194,7 +225,7 @@ export default function RecruiterDashboardPage() {
         body: JSON.stringify({
           application_id: targetAppId,
           interview_type: interviewType,
-          scheduled_time: new Date(scheduledTime).toISOString(),
+          scheduled_time: new Date(`${scheduledTime}:00+05:30`).toISOString(),
           timezone_str: "Asia/Kolkata",
           meeting_link: meetingLink,
         }),
@@ -329,7 +360,7 @@ export default function RecruiterDashboardPage() {
                       </h4>
                       <span className="text-[11px] text-brand-textSecondary">
                         Applied for <strong>{app.job?.title}</strong> •{" "}
-                        {new Date(app.applied_at).toLocaleDateString()}
+                        {formatISTDate(app.applied_at)}
                       </span>
                     </div>
                     <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-brand-softBg text-brand-deepNavy">
@@ -680,6 +711,28 @@ export default function RecruiterDashboardPage() {
               </span>
             </div>
           </div>
+          <form onSubmit={handleUpdateCompanyRegistration} className="space-y-3">
+            <p className="text-xs text-brand-textSecondary">
+              Provide company registration details for manual administrator review.
+            </p>
+            {(["gstin", "cin", "registration_number"] as const).map((field) => (
+              <label key={field} className="block text-xs font-bold text-brand-deepNavy">
+                {field === "gstin" ? "GSTIN" : field === "cin" ? "CIN" : "Other registration number"}
+                <input
+                  name={field}
+                  maxLength={field === "gstin" ? 15 : field === "cin" ? 21 : 100}
+                  defaultValue={company?.[field] || ""}
+                  className="mt-1 w-full rounded-xl border border-brand-border px-3 py-2.5 font-medium"
+                />
+              </label>
+            ))}
+            {companyUpdateMessage && (
+              <p className="text-xs text-brand-corpBlue" role="status">{companyUpdateMessage}</p>
+            )}
+            <button className="rounded-xl bg-brand-yellow px-4 py-2.5 text-xs font-extrabold text-brand-deepNavy">
+              Save registration details
+            </button>
+          </form>
         </div>
       )}
 

@@ -1,4 +1,24 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+const defaultApiUrl = "https://velvorax-careers.onrender.com/api/v1";
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL;
+const configuredApiIsLocal =
+  configuredApiUrl &&
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(?:\/|$)/i.test(configuredApiUrl);
+const runningOnLocalhost =
+  typeof window !== "undefined" &&
+  /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname);
+const useConfiguredApiUrl = configuredApiUrl && (!configuredApiIsLocal || runningOnLocalhost);
+
+export const API_BASE_URL = (
+  (useConfiguredApiUrl && configuredApiUrl) || defaultApiUrl
+).replace(/\/+$/, "");
+
+export function formatISTDate(value: string | Date, includeTime = false): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    ...(includeTime ? { timeStyle: "short" as const } : {}),
+  }).format(new Date(value));
+}
 
 export interface User {
   id: number;

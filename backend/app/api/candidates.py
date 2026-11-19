@@ -149,6 +149,23 @@ async def add_skill(
     await db.refresh(item)
     return SkillResponse.model_validate(item)
 
+@router.post(
+    "/me/certifications",
+    response_model=CertificationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_certification(
+    payload: CertificationCreate,
+    current_user: User = Depends(require_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await _get_or_create_profile(current_user, db)
+    item = CandidateCertification(candidate_id=profile.id, **payload.model_dump())
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return CertificationResponse.model_validate(item)
+
 # Resumes Management
 @router.post("/me/resumes", response_model=ResumeResponse, status_code=status.HTTP_201_CREATED)
 async def upload_resume(

@@ -3,10 +3,14 @@ import uuid
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
+from sqlalchemy import DateTime
 
 from app.main import app
-from app.core.database import async_session_maker
+from app.core.config import settings
+from app.core.database import async_session_maker, Base
 from app.models.user import User
+from app.models.company import Company, RecruiterProfile
+from app.models.candidate import CandidateProfile, Resume
 from app.services.email_service import EmailService
 
 @pytest.mark.asyncio
@@ -14,6 +18,157 @@ async def test_health_check(async_client: AsyncClient):
     response = await async_client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+@pytest.mark.asyncio
+async def test_auth_registration_preflight_and_duplicate_email(async_client: AsyncClient):
+    origin = settings.CORS_ORIGINS[0]
+    preflight = await async_client.options(
+        "/api/v1/auth/register/candidate",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert "POST" in preflight.headers["access-control-allow-methods"]
+
+    email = f"duplicate.{uuid.uuid4().hex}@velvorax.tech"
+    payload = {
+        "full_name": "Duplicate Candidate",
+        "email": email,
+        "password": "SecurePassword123!",
+        "confirm_password": "SecurePassword123!",
+        "terms_accepted": True,
+    }
+    first = await async_client.post("/api/v1/auth/register/candidate", json=payload)
+    duplicate = await async_client.post("/api/v1/auth/register/candidate", json=payload)
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Email already exists."
+
+def test_all_persisted_datetime_columns_are_timezone_aware():
+    datetime_columns = [
+        column
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if isinstance(column.type, DateTime)
+    ]
+    assert datetime_columns
+    assert all(column.type.timezone for column in datetime_columns)
+
+@pytest.mark.asyncio
+async def test_recruiter_must_have_verified_company_before_posting(
+    async_client: AsyncClient, test_recruiter, test_admin
+):
+    async with async_session_maker() as db:
+        company = await db.get(Company, test_recruiter["company_id"])
+        profile = (
+            await db.execute(
+                select(RecruiterProfile).where(
+                    RecruiterProfile.user_id == test_recruiter["user"].id
+                )
+            )
+        ).scalar_one()
+        company.is_verified = False
+        profile.is_approved = False
+        await db.commit()
+
+    job_payload = {
+        "title": f"Verified Employer Role {uuid.uuid4().hex[:6]}",
+        "category_id": 1,
+        "description": "A test role requiring manual employer verification.",
+        "skills": ["Python"],
+    }
+    blocked = await async_client.post(
+        "/api/v1/jobs", headers=test_recruiter["headers"], json=job_payload
+    )
+    assert blocked.status_code == 403
+
+    verification = await async_client.patch(
+        f"/api/v1/admin/companies/{test_recruiter['company_id']}/verify",
+        params={
+            "is_verified": "true",
+            "is_hiring_partner": "true",
+            "verification_notes": "Registration information manually reviewed.",
+        },
+        headers=test_admin["headers"],
+    )
+    assert verification.status_code == 200
+
+    allowed = await async_client.post(
+        "/api/v1/jobs", headers=test_recruiter["headers"], json=job_payload
+    )
+    assert allowed.status_code == 201
+
+@pytest.mark.asyncio
+async def test_candidate_cannot_apply_with_another_candidates_resume(
+    async_client: AsyncClient, test_candidate, test_recruiter, test_admin
+):
+    job = await async_client.post(
+        "/api/v1/jobs",
+        headers=test_recruiter["headers"],
+        json={
+            "title": f"Resume Ownership Role {uuid.uuid4().hex[:6]}",
+            "category_id": 1,
+            "description": "A test role for resume ownership validation.",
+            "skills": ["Python"],
+        },
+    )
+    assert job.status_code == 201
+    job_id = job.json()["id"]
+    approved = await async_client.post(
+        f"/api/v1/admin/jobs/{job_id}/approve", headers=test_admin["headers"]
+    )
+    assert approved.status_code == 200
+
+    async with async_session_maker() as db:
+        other_user = User(
+            email=f"other.candidate.{uuid.uuid4().hex}@velvorax.tech",
+            hashed_password="not-used",
+            full_name="Other Candidate",
+            role="CANDIDATE",
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        await db.flush()
+        other_profile = CandidateProfile(user_id=other_user.id)
+        db.add(other_profile)
+        await db.flush()
+        other_resume = Resume(
+            candidate_id=other_profile.id,
+            original_filename="resume.pdf",
+            blob_pathname=f"resumes/test/{uuid.uuid4().hex}.pdf",
+            blob_url="/uploads/resume.pdf",
+            file_size_bytes=100,
+            mime_type="application/pdf",
+        )
+        db.add(other_resume)
+        await db.commit()
+        other_resume_id = other_resume.id
+
+    response = await async_client.post(
+        "/api/v1/applications",
+        headers=test_candidate["headers"],
+        json={"job_id": job_id, "resume_id": other_resume_id},
+    )
+    assert response.status_code == 403
+
+@pytest.mark.asyncio
+async def test_candidate_can_add_certification(async_client: AsyncClient, test_candidate):
+    response = await async_client.post(
+        "/api/v1/candidates/me/certifications",
+        headers=test_candidate["headers"],
+        json={
+            "name": "Cloud Practitioner",
+            "issuing_organization": "Example Certification Board",
+            "credential_id": "CERT-123",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["name"] == "Cloud Practitioner"
 
 @pytest.mark.asyncio
 async def test_role_mismatch_rejected(async_client: AsyncClient, test_candidate):

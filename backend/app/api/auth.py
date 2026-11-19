@@ -145,7 +145,7 @@ async def register_candidate(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email address already exists."
+            detail="Email already exists."
         )
 
     # Create candidate user
@@ -224,7 +224,7 @@ async def register_recruiter(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this work email already exists."
+            detail="Email already exists."
         )
 
     # Check or create Company
@@ -236,6 +236,8 @@ async def register_recruiter(
             name=payload.company_name.strip(),
             slug=comp_slug,
             website=payload.company_website,
+            gstin=payload.company_gstin.strip().upper() if payload.company_gstin else None,
+            cin=payload.company_cin.strip().upper() if payload.company_cin else None,
             headquarters=payload.company_location,
             country="India",
             city=payload.company_location,
@@ -264,7 +266,7 @@ async def register_recruiter(
         designation=payload.designation,
         work_email=payload.work_email,
         phone=payload.phone,
-        is_approved=True  # Enabled for immediate testing
+        is_approved=False
     )
     db.add(recruiter_profile)
 

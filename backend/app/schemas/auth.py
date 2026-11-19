@@ -1,5 +1,11 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+
+def validate_bcrypt_password_length(password: str) -> str:
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("Password must be no more than 72 UTF-8 bytes.")
+    return password
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -10,12 +16,17 @@ class CandidateRegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     phone: Optional[str] = None
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     confirm_password: str
     country: Optional[str] = "India"
     state: Optional[str] = "Telangana"
     city: Optional[str] = "Hyderabad"
     terms_accepted: bool = True
+
+    @field_validator("password", "confirm_password")
+    @classmethod
+    def password_fits_bcrypt(cls, value: str) -> str:
+        return validate_bcrypt_password_length(value)
 
 class RecruiterRegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
@@ -23,11 +34,18 @@ class RecruiterRegisterRequest(BaseModel):
     phone: Optional[str] = None
     company_name: str = Field(..., min_length=2, max_length=150)
     company_website: Optional[str] = None
+    company_gstin: Optional[str] = Field(None, max_length=15)
+    company_cin: Optional[str] = Field(None, max_length=21)
     company_location: Optional[str] = "Hyderabad, India"
     designation: Optional[str] = "Talent Acquisition Specialist"
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     confirm_password: str
     terms_accepted: bool = True
+
+    @field_validator("password", "confirm_password")
+    @classmethod
+    def password_fits_bcrypt(cls, value: str) -> str:
+        return validate_bcrypt_password_length(value)
 
 class UserResponse(BaseModel):
     id: int
@@ -65,5 +83,10 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=8)
     confirm_password: str
+
+    @field_validator("new_password", "confirm_password")
+    @classmethod
+    def password_fits_bcrypt(cls, value: str) -> str:
+        return validate_bcrypt_password_length(value)

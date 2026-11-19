@@ -32,9 +32,9 @@ class TrainingProgram(Base):
     status: Mapped[str] = mapped_column(String(50), default="UPCOMING")  # UPCOMING, ONGOING, COMPLETED, CANCELLED
     is_published: Mapped[bool] = mapped_column(Boolean, default=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
@@ -48,16 +48,16 @@ class TrainingEnrollment(Base):
     program_id: Mapped[int] = mapped_column(Integer, ForeignKey("training_programs.id", ondelete="CASCADE"), nullable=False, index=True)
     candidate_id: Mapped[int] = mapped_column(Integer, ForeignKey("candidate_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    enrollment_date: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    enrollment_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     status: Mapped[str] = mapped_column(String(50), default="ENROLLED")  # ENROLLED, IN_PROGRESS, COMPLETED, DROPPED
     progress_percentage: Mapped[int] = mapped_column(Integer, default=0)
     
     certificate_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     certificate_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )

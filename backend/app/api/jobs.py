@@ -19,6 +19,7 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 @router.get("", response_model=JobListResponse)
 async def list_jobs(
     q: Optional[str] = Query(None, description="Search keyword across title, description, skills"),
+    skill: Optional[str] = Query(None, description="Filter by a required skill"),
     job_type: Optional[str] = Query(None, description="IT or NON_IT"),
     category_id: Optional[int] = Query(None),
     category_slug: Optional[str] = Query(None),
@@ -87,9 +88,12 @@ async def list_jobs(
             Job.title.ilike(f"%{q}%"),
             Job.description.ilike(f"%{q}%"),
             Job.city.ilike(f"%{q}%"),
-            Job.country.ilike(f"%{q}%")
+            Job.country.ilike(f"%{q}%"),
+            Job.skills.any(JobSkill.skill_name.ilike(f"%{q}%")),
         )
         conditions.append(search_filter)
+    if skill:
+        conditions.append(Job.skills.any(JobSkill.skill_name.ilike(f"%{skill}%")))
 
     # Count total
     count_query = select(func.count(Job.id)).where(and_(*conditions))
@@ -189,6 +193,14 @@ async def create_job(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Recruiter profile has no linked company. Please complete company setup first."
+            )
+        company = (
+            await db.execute(select(Company).where(Company.id == rec_profile.company_id))
+        ).scalar_one_or_none()
+        if not rec_profile.is_approved or not company or not company.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your recruiter and company profiles must be approved before posting jobs."
             )
         company_id = rec_profile.company_id
         recruiter_profile_id = rec_profile.id

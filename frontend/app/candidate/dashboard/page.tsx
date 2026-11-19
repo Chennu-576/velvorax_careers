@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   Building
 } from "lucide-react";
-import { API_BASE_URL, getAuthToken, getAuthUser, clearAuth } from "@/lib/api";
+import { API_BASE_URL, formatISTDate, getAuthToken, getAuthUser, clearAuth } from "@/lib/api";
 
 export default function CandidateDashboardPage() {
   const router = useRouter();
@@ -45,6 +45,11 @@ export default function CandidateDashboardPage() {
   const [githubUrl, setGithubUrl] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
+  const [certifications, setCertifications] = useState<any[]>([]);
+  const [certificationName, setCertificationName] = useState("");
+  const [certificationIssuer, setCertificationIssuer] = useState("");
+  const [certificationId, setCertificationId] = useState("");
+  const [certificationMessage, setCertificationMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -78,6 +83,7 @@ export default function CandidateDashboardPage() {
       if (profRes.ok) {
         const p = await profRes.json();
         setProfile(p);
+        setCertifications(p.certifications || []);
         setHeadline(p.headline || "");
         setSummary(p.summary || "");
         setExpectedSalary(p.expected_salary || "");
@@ -189,6 +195,34 @@ export default function CandidateDashboardPage() {
       console.error(err);
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleAddCertification = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setCertificationMessage(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/me/certifications`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getAuthToken()}`,
+        },
+        body: JSON.stringify({
+          name: certificationName.trim(),
+          issuing_organization: certificationIssuer.trim(),
+          credential_id: certificationId.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unable to save certification.");
+      setCertifications((current) => [...current, data]);
+      setCertificationName("");
+      setCertificationIssuer("");
+      setCertificationId("");
+      setCertificationMessage("Certification saved.");
+    } catch (error) {
+      setCertificationMessage(error instanceof Error ? error.message : "Unable to save certification.");
     }
   };
 
@@ -308,7 +342,7 @@ export default function CandidateDashboardPage() {
                       <h4 className="font-bold text-xs text-brand-deepNavy">{app.job?.title}</h4>
                       <span className="text-[11px] text-brand-textSecondary">
                         {app.job?.company?.name} • Applied on{" "}
-                        {new Date(app.applied_at).toLocaleDateString()}
+                        {formatISTDate(app.applied_at)}
                       </span>
                     </div>
                     <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase bg-brand-softBg text-brand-deepNavy border border-brand-border">
@@ -358,7 +392,7 @@ export default function CandidateDashboardPage() {
                         <span>
                           Interview scheduled:{" "}
                           <strong>
-                            {new Date(app.interviews[0].scheduled_time).toLocaleString()}
+                            {formatISTDate(app.interviews[0].scheduled_time, true)}
                           </strong>{" "}
                           ({app.interviews[0].interview_type})
                         </span>
@@ -453,7 +487,7 @@ export default function CandidateDashboardPage() {
                       </h4>
                       <span className="text-[11px] text-brand-textSecondary">
                         {(r.file_size_bytes / 1024).toFixed(1)} KB • Uploaded{" "}
-                        {new Date(r.created_at).toLocaleDateString()}
+                        {formatISTDate(r.created_at)}
                       </span>
                     </div>
                   </div>
@@ -576,6 +610,45 @@ export default function CandidateDashboardPage() {
               {savingProfile ? "Saving Profile..." : "Save Profile Details"}
             </button>
           </form>
+
+          <div className="mt-8 border-t border-brand-border pt-6">
+            <h4 className="font-bold text-sm text-brand-deepNavy">Certifications</h4>
+            <ul className="my-3 space-y-2 text-xs">
+              {certifications.map((cert) => (
+                <li key={cert.id} className="rounded-xl bg-brand-softBg p-3">
+                  <strong>{cert.name}</strong> — {cert.issuing_organization}
+                </li>
+              ))}
+            </ul>
+            <form onSubmit={handleAddCertification} className="grid gap-3 sm:grid-cols-2">
+              <input
+                required
+                value={certificationName}
+                onChange={(event) => setCertificationName(event.target.value)}
+                placeholder="Certification name"
+                className="rounded-xl border border-brand-border px-3 py-2.5"
+              />
+              <input
+                required
+                value={certificationIssuer}
+                onChange={(event) => setCertificationIssuer(event.target.value)}
+                placeholder="Issuing organization"
+                className="rounded-xl border border-brand-border px-3 py-2.5"
+              />
+              <input
+                value={certificationId}
+                onChange={(event) => setCertificationId(event.target.value)}
+                placeholder="Credential ID (optional)"
+                className="rounded-xl border border-brand-border px-3 py-2.5"
+              />
+              <button className="rounded-xl bg-brand-deepNavy px-4 py-2.5 text-xs font-bold text-white">
+                Add certification
+              </button>
+            </form>
+            {certificationMessage && (
+              <p className="mt-2 text-xs text-brand-corpBlue" role="status">{certificationMessage}</p>
+            )}
+          </div>
         </div>
       )}
 

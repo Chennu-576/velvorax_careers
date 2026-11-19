@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.core.permissions import require_recruiter
@@ -28,6 +28,9 @@ class RecruiterDashboardStats(BaseModel):
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     website: Optional[str] = None
+    gstin: Optional[str] = Field(None, max_length=15)
+    cin: Optional[str] = Field(None, max_length=21)
+    registration_number: Optional[str] = Field(None, max_length=100)
     industry: Optional[str] = None
     company_size: Optional[str] = None
     headquarters: Optional[str] = None
@@ -44,6 +47,9 @@ class CompanyResponse(BaseModel):
     slug: str
     logo_url: Optional[str] = None
     website: Optional[str] = None
+    gstin: Optional[str] = None
+    cin: Optional[str] = None
+    registration_number: Optional[str] = None
     industry: Optional[str] = None
     company_size: Optional[str] = None
     headquarters: Optional[str] = None
@@ -53,6 +59,7 @@ class CompanyResponse(BaseModel):
     description: Optional[str] = None
     is_verified: bool
     is_hiring_partner: bool
+    verification_notes: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -140,8 +147,26 @@ async def update_my_company(
     if not comp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found.")
 
-    for field, val in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    registration_changed = any(
+        field in update_data for field in ("gstin", "cin", "registration_number")
+    )
+    for field, val in update_data.items():
+        if field in {"gstin", "cin"} and val:
+            val = val.strip().upper()
         setattr(comp, field, val)
+
+    if registration_changed:
+        comp.is_verified = False
+        comp.verified_at = None
+        comp.verified_by_user_id = None
+        comp.verification_notes = None
+        for profile in (
+            await db.execute(
+                select(RecruiterProfile).where(RecruiterProfile.company_id == comp.id)
+            )
+        ).scalars():
+            profile.is_approved = False
 
     await db.commit()
     await db.refresh(comp)
